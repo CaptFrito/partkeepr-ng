@@ -1,0 +1,656 @@
+/* partkeepr-ng — basic styling. Plain CSS for now; Tailwind/etc. later. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #1f2937;
+    background: #f3f4f6;
+}
+button { font: inherit; }
+
+/* ---- Top-level layout: 3 columns + header ---- */
+/* Right column uses clamp() so it's wide enough on large monitors (where
+   editor cards have room to breathe) without crowding the parts grid on
+   smaller screens. */
+.app {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) clamp(420px, 28vw, 640px);
+    grid-template-rows: 36px 1fr;
+    height: 100vh;
+}
+.app.left-collapsed { grid-template-columns: 0 minmax(0, 1fr) clamp(420px, 28vw, 640px); }
+.app.right-collapsed { grid-template-columns: 280px minmax(0, 1fr) 0; }
+.app.left-collapsed.right-collapsed { grid-template-columns: 0 1fr 0; }
+header {
+    grid-column: 1 / -1;
+    background: #1f2937;
+    color: #fff;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+header .title { flex-shrink: 0; }
+header .panel-toggle {
+    background: transparent;
+    color: #cbd5e1;
+    border: 1px solid #374151;
+    border-radius: 3px;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.4;
+}
+header .panel-toggle:hover { background: #374151; color: #fff; }
+aside {
+    background: #fff;
+    border-right: 1px solid #e5e7eb;
+    overflow-y: auto;
+    padding: 8px 4px;
+}
+.center {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+    border-right: 1px solid #e5e7eb;
+}
+.detail {
+    overflow-y: auto;
+    background: #fff;
+}
+
+/* ---- Tree (left sidebar) ---- */
+.tree-node {
+    cursor: pointer;
+    user-select: none;
+    padding: 3px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.tree-node:hover { background: #eef2ff; }
+.tree-node.selected { background: #c7d2fe; font-weight: 600; }
+.tree-node .chev {
+    display: inline-block;
+    width: 12px;
+    text-align: center;
+    color: #6b7280;
+    font-size: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.tree-node .chev:hover { color: #1f2937; }
+.tree-children { padding-left: 14px; }
+
+/* ---- Toolbar above the parts grid ---- */
+.toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fafafa;
+    flex-shrink: 0;
+}
+.toolbar input[type="text"] {
+    padding: 4px 28px 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    width: 280px;
+}
+.toolbar .search-wrap { position: relative; }
+.toolbar .clear-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: 0;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+}
+.toolbar .clear-btn:hover { color: #374151; }
+.toolbar button.page {
+    padding: 4px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+}
+.toolbar button.page:disabled {
+    color: #9ca3af;
+    background: #f3f4f6;
+    cursor: not-allowed;
+}
+.toolbar .total {
+    color: #6b7280;
+    font-size: 12px;
+}
+.toolbar .spacer { flex: 1; }
+
+/* ---- Parts grid ---- */
+.parts-grid {
+    overflow-y: auto;
+    flex: 1;
+    padding: 0;
+}
+.section-header {
+    background: #f9fafb;
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.section-header .crumb-sep { color: #9ca3af; padding: 0 4px; }
+.section-header .count { color: #9ca3af; font-weight: 400; }
+
+table.parts {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+table.parts th, table.parts td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid #f3f4f6;
+}
+table.parts th {
+    background: #fff;
+    color: #6b7280;
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 28px;        /* below sticky section header */
+    z-index: 0;
+}
+table.parts th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+table.parts th.sortable:hover {
+    color: #1f2937;
+    background: #f3f4f6;
+}
+table.parts th.sortable .arrow {
+    font-size: 10px;
+    margin-left: 4px;
+}
+/* Default arrows visible always, in muted color */
+table.parts th.sortable .arrow.idle { color: #d1d5db; }
+table.parts th.sortable .arrow.active { color: #2563eb; }
+
+/* Active-filter banner shown above the parts grid */
+.active-filter {
+    background: #eff6ff;
+    color: #1e40af;
+    border-bottom: 1px solid #dbeafe;
+    padding: 4px 10px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.active-filter .clear-filter {
+    background: transparent;
+    border: 1px solid #93c5fd;
+    color: #1e40af;
+    border-radius: 3px;
+    padding: 0 6px;
+    cursor: pointer;
+    font-size: 11px;
+}
+.active-filter .clear-filter:hover { background: #dbeafe; }
+
+/* Pagination "Page N of M" between Prev/Next */
+.toolbar .page-of {
+    font-size: 12px;
+    color: #6b7280;
+    padding: 0 4px;
+}
+
+/* Collapsible detail sections */
+.detail h3.collapsible {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.detail h3.collapsible:hover { color: #1f2937; }
+.detail h3.collapsible .chev {
+    font-size: 9px;
+    color: #9ca3af;
+    width: 8px;
+    display: inline-block;
+}
+table.parts tr { cursor: pointer; }
+table.parts tr:hover td { background: #f9fafb; }
+table.parts tr.selected td { background: #dbeafe; }
+.right { text-align: right; }
+.low-stock { color: #dc2626; font-weight: 600; }
+
+/* ---- Detail panel ---- */
+.detail .empty {
+    color: #9ca3af;
+    padding: 24px 16px;
+    font-style: italic;
+}
+.detail .head {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.detail h2 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+}
+.detail .crumb {
+    color: #6b7280;
+    font-size: 11px;
+}
+
+/* Tabs — color-coded per tab so you can always tell which is active.
+   nth-child selectors map to the tab order in part_editor.rs:
+   1=Basic, 2=Manufacturers, 3=Distributors, 4=Parameters. */
+.tabs {
+    display: flex;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fafafa;
+}
+.tabs button {
+    background: transparent;
+    border: 0;
+    padding: 8px 12px;
+    cursor: pointer;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+    white-space: nowrap;
+}
+.tabs button:hover { color: #1f2937; background: #f3f4f6; }
+.tabs button.active { font-weight: 600; }
+/* Per-tab accent colors. The active-tab color matches the button-color
+   convention used elsewhere (gray=neutral, green=add, blue=info, purple=parametric). */
+.tabs button:nth-child(1).active { color: #1f2937; border-bottom-color: #6b7280; }
+.tabs button:nth-child(2).active { color: #15803d; border-bottom-color: #16a34a; }
+.tabs button:nth-child(3).active { color: #1d4ed8; border-bottom-color: #2563eb; }
+.tabs button:nth-child(4).active { color: #6d28d9; border-bottom-color: #9333ea; }
+
+.tab-body { padding: 12px 16px; }
+
+/* Key-value table */
+.kv {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 4px 12px;
+    margin: 0 0 8px 0;
+}
+.kv dt { color: #6b7280; padding: 2px 0; }
+.kv dd { margin: 0; padding: 2px 0; }
+
+/* Detail sub-tables (manufacturers, distributors, parameters, attachments) */
+.detail h3 {
+    margin: 14px 0 6px 0;
+    font-size: 12px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.detail table.sub {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
+}
+.detail table.sub th, .detail table.sub td {
+    text-align: left;
+    padding: 3px 6px;
+    border-bottom: 1px solid #f3f4f6;
+}
+.detail table.sub th {
+    color: #9ca3af;
+    font-weight: 500;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+.muted { color: #9ca3af; }
+.delta-pos { color: #16a34a; }
+.delta-neg { color: #dc2626; }
+
+/* ---- Detail panel: action toolbar under the part header ---- */
+.detail .part-actions {
+    margin-top: 10px;
+    padding: 6px;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.btn-action {
+    padding: 5px 11px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+}
+.btn-action:hover { background: #f9fafb; }
+.btn-action.btn-add { color: #15803d; border-color: #86efac; }
+.btn-action.btn-add:hover { background: #f0fdf4; }
+.btn-action.btn-remove { color: #b91c1c; border-color: #fca5a5; }
+.btn-action.btn-remove:hover { background: #fef2f2; }
+.btn-action.btn-recon { color: #1d4ed8; border-color: #93c5fd; }
+.btn-action.btn-recon:hover { background: #eff6ff; }
+.btn-action.btn-disabled,
+.btn-action[disabled] {
+    color: #9ca3af;
+    background: #f9fafb;
+    border-color: #e5e7eb;
+    cursor: not-allowed;
+}
+.btn-action[disabled]:hover { background: #f9fafb; }
+
+/* ---- Stock dialog extras ---- */
+.modal-context {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #4b5563;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+.modal-context strong { color: #1f2937; }
+.modal-help {
+    margin: 0;
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+/* ---- Modal dialog (used by stock add/remove, future part edit) ---- */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.40);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+.modal {
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    min-width: 360px;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+}
+/* Wider variant for help/info modals (parameter type explainer, etc.) */
+.modal.modal-help-wide {
+    max-width: 640px;
+    max-height: 85vh;
+}
+.modal-help-body {
+    overflow-y: auto;
+    line-height: 1.5;
+    color: #1f2937;
+}
+.modal-help-body h4 {
+    margin: 14px 0 6px 0;
+    color: #1f2937;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+.modal-help-body ul {
+    margin: 4px 0 8px 0;
+    padding-left: 20px;
+}
+.modal-help-body li { margin-bottom: 3px; }
+.modal-help-body code {
+    background: #f3f4f6;
+    color: #1f2937;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+.modal-help-examples {
+    font-style: italic;
+    margin: 4px 0 8px 0;
+}
+.modal-head {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.modal-head h3 {
+    margin: 0;
+    font-size: 15px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #1f2937;
+    flex: 1;
+}
+.modal-close {
+    background: transparent;
+    border: 0;
+    color: #6b7280;
+    cursor: pointer;
+    font-size: 14px;
+}
+.modal-close:hover { color: #1f2937; }
+.modal-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.modal-foot {
+    padding: 10px 14px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #4b5563;
+}
+.field input {
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1f2937;
+}
+.field-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #4b5563;
+    cursor: pointer;
+}
+.btn-primary {
+    padding: 6px 14px;
+    background: #2563eb;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+.btn-secondary {
+    padding: 6px 14px;
+    background: #fff;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.btn-secondary:hover { background: #f3f4f6; }
+.btn-secondary:disabled { color: #9ca3af; cursor: not-allowed; }
+.modal-error {
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+}
+.btn-danger {
+    padding: 6px 14px;
+    background: #dc2626;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.btn-danger:hover { background: #b91c1c; }
+.btn-danger:disabled { background: #fca5a5; cursor: not-allowed; }
+
+/* Form textareas in the editor */
+.field textarea {
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1f2937;
+    font-family: inherit;
+    resize: vertical;
+}
+.field select {
+    padding: 5px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1f2937;
+    background: #fff;
+}
+.field-hint {
+    color: #9ca3af;
+    cursor: help;
+    font-size: 11px;
+}
+
+/* ---- Editable sub-tables in the part editor ---- */
+table.sub.edit input[type="text"],
+table.sub.edit input[type="number"],
+table.sub.edit select {
+    width: 100%;
+    padding: 3px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 12px;
+}
+table.sub.edit td { padding: 3px 4px; }
+.row-remove {
+    background: transparent;
+    border: 0;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+}
+.row-remove:hover { color: #dc2626; }
+
+/* Parameters tab: each row is a small card; consistent grid layout
+   keeps the value-input + SI-prefix + unit dropdowns aligned across
+   rows even when min/max are present. */
+.param-row {
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.param-row-head {
+    display: grid;
+    /* [name-label][name-input — fills][type-label][type-select][remove] */
+    grid-template-columns: 50px 1fr 50px 100px 24px;
+    gap: 6px;
+    align-items: center;
+}
+.param-row-head input[type="text"],
+.param-row-head select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 13px;
+    min-width: 0;
+}
+.numeric-row {
+    display: grid;
+    /* "Value" label | input | SI prefix dropdown | unit dropdown */
+    grid-template-columns: 50px 90px 100px 80px;
+    gap: 6px;
+    align-items: center;
+}
+.minmax-row {
+    display: grid;
+    /* min-label | min-input | min-prefix | max-label | max-input | max-prefix */
+    grid-template-columns: 50px 90px 100px 50px 90px 100px;
+    gap: 6px;
+    align-items: center;
+}
+.minmax-row .max-label { margin-left: 12px; }
+.numeric-label {
+    color: #6b7280;
+    font-size: 12px;
+    text-align: right;
+}
+.numeric-row input[type="text"],
+.numeric-row select,
+.minmax-row input[type="text"],
+.minmax-row select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 12px;
+    width: 100%;
+    min-width: 0;
+}
+.string-value-row {
+    margin-top: 4px;
+}
+.string-value-row input {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 13px;
+}

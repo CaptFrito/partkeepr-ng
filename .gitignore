@@ -1,0 +1,29 @@
+# Build outputs (Cargo puts the workspace target/ at the root; per-crate
+# target/ dirs may also exist if a crate was built standalone)
+target/
+backend/target/
+frontend/target/
+frontend/dist/
+
+# Dev secrets and local-only env
+backend/.env
+frontend/.env
+
+# Upstream reference clone — re-clone via:
+#   cd reference && git clone https://github.com/partkeepr/PartKeepr.git
+# (gitignored to avoid embedding a foreign git repo and to keep our
+# tree small. The 1272-issue archive in docs/upstream-issues/ is
+# tracked because it preserves data that may not be reachable on
+# GitHub forever.)
+reference/PartKeepr/
+
+# Live data dumps — user's actual inventory; not for source control.
+# The schema-only dump and migration list ARE tracked so anyone can
+# spin up a dev DB from a checkout.
+docs/live-schema/partkeepr-data.sql
+
+# Editor / OS junk
+**/*.swp
+**/*.swo
+.DS_Store
+*~

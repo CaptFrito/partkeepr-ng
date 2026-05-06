@@ -1,0 +1,4515 @@
+{
+  "entities": [
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/AuthBundle/Entity/FOSUser.php",
+      "namespace": "PartKeepr\\AuthBundle\\Entity",
+      "class": "FOSUser",
+      "fqcn": "PartKeepr\\AuthBundle\\Entity\\FOSUser",
+      "parent": "BaseUser",
+      "bundle": "AuthBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": "FOSUser",
+      "table_extras": {
+        "name": "FOSUser"
+      },
+      "target_service": "/api/f_o_s_users",
+      "fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/AuthBundle/Entity/User.php",
+      "namespace": "PartKeepr\\AuthBundle\\Entity",
+      "class": "User",
+      "fqcn": "PartKeepr\\AuthBundle\\Entity\\User",
+      "parent": "BaseEntity",
+      "bundle": "AuthBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": "PartKeeprUser",
+      "table_extras": {
+        "name": "PartKeeprUser",
+        "uniqueConstraints": "{@ORM\\UniqueConstraint(name=\"username_provider\", columns={\"username\", \"provider_id\"})}"
+      },
+      "target_service": "/api/users",
+      "fields": [
+        {
+          "name": "username",
+          "kind": "column",
+          "type": "string",
+          "length": 50
+        },
+        {
+          "name": "password",
+          "kind": "column",
+          "type": "string",
+          "length": 32,
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "nullable": true
+        },
+        {
+          "name": "admin",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "legacy",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "lastSeen",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "provider",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\UserProvider"
+        },
+        {
+          "name": "tipHistories",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\TipOfTheDayBundle\\Entity\\TipOfTheDayHistory",
+          "mapped_by": "user",
+          "cascade": "{\"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "active",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "protected",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "username",
+          "kind": "column",
+          "type": "string",
+          "length": 50
+        },
+        {
+          "name": "password",
+          "kind": "column",
+          "type": "string",
+          "length": 32,
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "nullable": true
+        },
+        {
+          "name": "admin",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "legacy",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "lastSeen",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "provider",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\UserProvider"
+        },
+        {
+          "name": "tipHistories",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\TipOfTheDayBundle\\Entity\\TipOfTheDayHistory",
+          "mapped_by": "user",
+          "cascade": "{\"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "active",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "protected",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/AuthBundle/Entity/UserPreference.php",
+      "namespace": "PartKeepr\\AuthBundle\\Entity",
+      "class": "UserPreference",
+      "fqcn": "PartKeepr\\AuthBundle\\Entity\\UserPreference",
+      "parent": null,
+      "bundle": "AuthBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/user_preferences",
+      "fields": [
+        {
+          "name": "preferenceKey",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "primary_key": true
+        },
+        {
+          "name": "preferenceValue",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "preferenceKey",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "primary_key": true
+        },
+        {
+          "name": "preferenceValue",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/AuthBundle/Entity/UserProvider.php",
+      "namespace": "PartKeepr\\AuthBundle\\Entity",
+      "class": "UserProvider",
+      "fqcn": "PartKeepr\\AuthBundle\\Entity\\UserProvider",
+      "parent": "BaseEntity",
+      "bundle": "AuthBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": "UserProvider",
+      "table_extras": {
+        "name": "UserProvider",
+        "uniqueConstraints": "{@ORM\\UniqueConstraint(name=\"type\", columns={\"type\"})}"
+      },
+      "target_service": "/api/user_providers",
+      "fields": [
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "editable",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "editable",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/BatchJobBundle/Entity/BatchJob.php",
+      "namespace": "PartKeepr\\BatchJobBundle\\Entity",
+      "class": "BatchJob",
+      "fqcn": "PartKeepr\\BatchJobBundle\\Entity\\BatchJob",
+      "parent": "BaseEntity",
+      "bundle": "BatchJobBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/batch_jobs",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 64,
+          "unique": true
+        },
+        {
+          "name": "batchJobQueryFields",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobQueryField",
+          "mapped_by": "batchJob",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "batchJobUpdateFields",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobUpdateField",
+          "mapped_by": "batchJob",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "baseEntity",
+          "kind": "column",
+          "type": "string"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 64,
+          "unique": true
+        },
+        {
+          "name": "batchJobQueryFields",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobQueryField",
+          "mapped_by": "batchJob",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "batchJobUpdateFields",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobUpdateField",
+          "mapped_by": "batchJob",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "baseEntity",
+          "kind": "column",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/BatchJobBundle/Entity/BatchJobQueryField.php",
+      "namespace": "PartKeepr\\BatchJobBundle\\Entity",
+      "class": "BatchJobQueryField",
+      "fqcn": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobQueryField",
+      "parent": "BaseEntity",
+      "bundle": "BatchJobBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "batchJob",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJob",
+          "inversed_by": "batchJobQueryFields"
+        },
+        {
+          "name": "property",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "operator",
+          "kind": "column",
+          "type": "string",
+          "length": 64
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "dynamic",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "batchJob",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJob",
+          "inversed_by": "batchJobQueryFields"
+        },
+        {
+          "name": "property",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "operator",
+          "kind": "column",
+          "type": "string",
+          "length": 64
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "dynamic",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/BatchJobBundle/Entity/BatchJobUpdateField.php",
+      "namespace": "PartKeepr\\BatchJobBundle\\Entity",
+      "class": "BatchJobUpdateField",
+      "fqcn": "PartKeepr\\BatchJobBundle\\Entity\\BatchJobUpdateField",
+      "parent": "BaseEntity",
+      "bundle": "BatchJobBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "batchJob",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJob",
+          "inversed_by": "batchJobQueryFields"
+        },
+        {
+          "name": "property",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "dynamic",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "batchJob",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\BatchJobBundle\\Entity\\BatchJob",
+          "inversed_by": "batchJobQueryFields"
+        },
+        {
+          "name": "property",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "dynamic",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/CategoryBundle/Entity/AbstractCategory.php",
+      "namespace": "PartKeepr\\CategoryBundle\\Entity",
+      "class": "AbstractCategory",
+      "fqcn": "PartKeepr\\CategoryBundle\\Entity\\AbstractCategory",
+      "parent": "BaseEntity",
+      "bundle": "CategoryBundle",
+      "is_entity": false,
+      "is_mapped_superclass": true,
+      "table_name": null,
+      "table_extras": {
+        "indexes": "{@ORM\\Index(columns={\"lft\"}),@ORM\\Index(columns={\"rgt\"})}"
+      },
+      "target_service": null,
+      "fields": [
+        {
+          "name": "lft",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "rgt",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lvl",
+          "kind": "column",
+          "type": "integer",
+          "column_name": "lvl"
+        },
+        {
+          "name": "root",
+          "kind": "column",
+          "type": "integer",
+          "nullable": true,
+          "column_name": "root"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 128
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "lft",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "rgt",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lvl",
+          "kind": "column",
+          "type": "integer",
+          "column_name": "lvl"
+        },
+        {
+          "name": "root",
+          "kind": "column",
+          "type": "integer",
+          "nullable": true,
+          "column_name": "root"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 128
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/CoreBundle/Entity/BaseEntity.php",
+      "namespace": "PartKeepr\\CoreBundle\\Entity",
+      "class": "BaseEntity",
+      "fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "parent": null,
+      "bundle": "CoreBundle",
+      "is_entity": false,
+      "is_mapped_superclass": true,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/CoreBundle/Entity/SystemNotice.php",
+      "namespace": "PartKeepr\\CoreBundle\\Entity",
+      "class": "SystemNotice",
+      "fqcn": "PartKeepr\\CoreBundle\\Entity\\SystemNotice",
+      "parent": "BaseEntity",
+      "bundle": "CoreBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "date",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "title",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "acknowledged",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "date",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "title",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "acknowledged",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/CronLoggerBundle/Entity/CronLogger.php",
+      "namespace": "PartKeepr\\CronLoggerBundle\\Entity",
+      "class": "CronLogger",
+      "fqcn": "PartKeepr\\CronLoggerBundle\\Entity\\CronLogger",
+      "parent": "BaseEntity",
+      "bundle": "CronLoggerBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "uniqueConstraints": "{@ORM\\UniqueConstraint(name=\"cronjob\", columns={\"cronjob\"})}"
+      },
+      "target_service": null,
+      "fields": [
+        {
+          "name": "lastRunDate",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "cronjob",
+          "kind": "column",
+          "type": "string"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "lastRunDate",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "cronjob",
+          "kind": "column",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/DistributorBundle/Entity/Distributor.php",
+      "namespace": "PartKeepr\\DistributorBundle\\Entity",
+      "class": "Distributor",
+      "fqcn": "PartKeepr\\DistributorBundle\\Entity\\Distributor",
+      "parent": "BaseEntity",
+      "bundle": "DistributorBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/distributors",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "address",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "url",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "phone",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "fax",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "skuurl",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "enabledForReports",
+          "kind": "column",
+          "type": "boolean",
+          "options": "{ \"default\":false}"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "address",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "url",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "phone",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "fax",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "skuurl",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "enabledForReports",
+          "kind": "column",
+          "type": "boolean",
+          "options": "{ \"default\":false}"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/FootprintBundle/Entity/Footprint.php",
+      "namespace": "PartKeepr\\FootprintBundle\\Entity",
+      "class": "Footprint",
+      "fqcn": "PartKeepr\\FootprintBundle\\Entity\\Footprint",
+      "parent": "BaseEntity",
+      "bundle": "FootprintBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/footprints",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 64,
+          "unique": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "FootprintCategory",
+          "inversed_by": "footprints"
+        },
+        {
+          "name": "image",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\FootprintImage",
+          "mapped_by": "footprint"
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\FootprintAttachment",
+          "mapped_by": "footprint",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 64,
+          "unique": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "FootprintCategory",
+          "inversed_by": "footprints"
+        },
+        {
+          "name": "image",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\FootprintImage",
+          "mapped_by": "footprint"
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\FootprintAttachment",
+          "mapped_by": "footprint",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/FootprintBundle/Entity/FootprintAttachment.php",
+      "namespace": "PartKeepr\\FootprintBundle\\Entity",
+      "class": "FootprintAttachment",
+      "fqcn": "PartKeepr\\FootprintBundle\\Entity\\FootprintAttachment",
+      "parent": "UploadedFile",
+      "bundle": "FootprintBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "footprint",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint",
+          "inversed_by": "attachments"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "footprint",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint",
+          "inversed_by": "attachments"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/FootprintBundle/Entity/FootprintCategory.php",
+      "namespace": "PartKeepr\\FootprintBundle\\Entity",
+      "class": "FootprintCategory",
+      "fqcn": "PartKeepr\\FootprintBundle\\Entity\\FootprintCategory",
+      "parent": "AbstractCategory",
+      "bundle": "FootprintBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "indexes": "{@ORM\\Index(columns={\"lft\"}),@ORM\\Index(columns={\"rgt\"})}"
+      },
+      "target_service": "/api/footprint_categories",
+      "fields": [
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "FootprintCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "FootprintCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "footprints",
+          "kind": "one_to_many",
+          "target": "Footprint",
+          "mapped_by": "category"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CategoryBundle\\Entity\\AbstractCategory",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "lft",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "rgt",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lvl",
+          "kind": "column",
+          "type": "integer",
+          "column_name": "lvl"
+        },
+        {
+          "name": "root",
+          "kind": "column",
+          "type": "integer",
+          "nullable": true,
+          "column_name": "root"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 128
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "FootprintCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "FootprintCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "footprints",
+          "kind": "one_to_many",
+          "target": "Footprint",
+          "mapped_by": "category"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/FootprintBundle/Entity/FootprintImage.php",
+      "namespace": "PartKeepr\\FootprintBundle\\Entity",
+      "class": "FootprintImage",
+      "fqcn": "PartKeepr\\FootprintBundle\\Entity\\FootprintImage",
+      "parent": "Image",
+      "bundle": "FootprintBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "footprint",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint",
+          "inversed_by": "image"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\ImageBundle\\Entity\\Image",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "footprint",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint",
+          "inversed_by": "image"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/FrontendBundle/Entity/GridPreset.php",
+      "namespace": "PartKeepr\\FrontendBundle\\Entity",
+      "class": "GridPreset",
+      "fqcn": "PartKeepr\\FrontendBundle\\Entity\\GridPreset",
+      "parent": "BaseEntity",
+      "bundle": "FrontendBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "uniqueConstraints": "{@ORM\\UniqueConstraint(name=\"name_grid_unique\", columns={\"grid\", \"name\"})}"
+      },
+      "target_service": "/api/grid_presets",
+      "fields": [
+        {
+          "name": "grid",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "configuration",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "gridDefault",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "grid",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "configuration",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "gridDefault",
+          "kind": "column",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ImageBundle/Entity/CachedImage.php",
+      "namespace": "PartKeepr\\ImageBundle\\Entity",
+      "class": "CachedImage",
+      "fqcn": "PartKeepr\\ImageBundle\\Entity\\CachedImage",
+      "parent": "BaseEntity",
+      "bundle": "ImageBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "originalId",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "originalType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "cacheFile",
+          "kind": "column",
+          "type": "string"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "originalId",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "originalType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "cacheFile",
+          "kind": "column",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ImageBundle/Entity/Image.php",
+      "namespace": "PartKeepr\\ImageBundle\\Entity",
+      "class": "Image",
+      "fqcn": "PartKeepr\\ImageBundle\\Entity\\Image",
+      "parent": "UploadedFile",
+      "bundle": "ImageBundle",
+      "is_entity": false,
+      "is_mapped_superclass": true,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [],
+      "parent_fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ImageBundle/Entity/TempImage.php",
+      "namespace": "PartKeepr\\ImageBundle\\Entity",
+      "class": "TempImage",
+      "fqcn": "PartKeepr\\ImageBundle\\Entity\\TempImage",
+      "parent": "Image",
+      "bundle": "ImageBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [],
+      "parent_fqcn": "PartKeepr\\ImageBundle\\Entity\\Image",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ImportBundle/Entity/ImportPreset.php",
+      "namespace": "PartKeepr\\ImportBundle\\Entity",
+      "class": "ImportPreset",
+      "fqcn": "PartKeepr\\ImportBundle\\Entity\\ImportPreset",
+      "parent": "BaseEntity",
+      "bundle": "ImportBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "uniqueConstraints": "{@ORM\\UniqueConstraint(name=\"name_entity_unique\", columns={\"baseEntity\", \"name\"})}"
+      },
+      "target_service": "/api/import_presets",
+      "fields": [
+        {
+          "name": "baseEntity",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "configuration",
+          "kind": "column",
+          "type": "text"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "baseEntity",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 255
+        },
+        {
+          "name": "configuration",
+          "kind": "column",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ManufacturerBundle/Entity/Manufacturer.php",
+      "namespace": "PartKeepr\\ManufacturerBundle\\Entity",
+      "class": "Manufacturer",
+      "fqcn": "PartKeepr\\ManufacturerBundle\\Entity\\Manufacturer",
+      "parent": "BaseEntity",
+      "bundle": "ManufacturerBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/manufacturers",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "address",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "url",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "phone",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "fax",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "icLogos",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\ManufacturerICLogo",
+          "mapped_by": "manufacturer",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "address",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "url",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "phone",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "fax",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "icLogos",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\ManufacturerICLogo",
+          "mapped_by": "manufacturer",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ManufacturerBundle/Entity/ManufacturerICLogo.php",
+      "namespace": "PartKeepr\\ManufacturerBundle\\Entity",
+      "class": "ManufacturerICLogo",
+      "fqcn": "PartKeepr\\ManufacturerBundle\\Entity\\ManufacturerICLogo",
+      "parent": "Image",
+      "bundle": "ManufacturerBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "manufacturer",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\Manufacturer",
+          "inversed_by": "icLogos",
+          "join_column": {
+            "name": "manufacturer_id",
+            "referencedColumnName": "id"
+          }
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\ImageBundle\\Entity\\Image",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "manufacturer",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\Manufacturer",
+          "inversed_by": "icLogos",
+          "join_column": {
+            "name": "manufacturer_id",
+            "referencedColumnName": "id"
+          }
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/MetaPartParameterCriteria.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "MetaPartParameterCriteria",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\MetaPartParameterCriteria",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "metaPartParameterCriterias"
+        },
+        {
+          "name": "partParameterName",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "operator",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "normalizedValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "siPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "stringValue",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "valueType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "unit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\UnitBundle\\Entity\\Unit"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "metaPartParameterCriterias"
+        },
+        {
+          "name": "partParameterName",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "operator",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "normalizedValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "siPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "stringValue",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "valueType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "unit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\UnitBundle\\Entity\\Unit"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/Part.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "Part",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\Part",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/parts",
+      "fields": [
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartCategory"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "footprint",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint"
+        },
+        {
+          "name": "partUnit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartMeasurementUnit",
+          "inversed_by": "parts"
+        },
+        {
+          "name": "storageLocation",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation"
+        },
+        {
+          "name": "manufacturers",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartManufacturer",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "distributors",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartDistributor",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartAttachment",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "minStockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "averagePrice",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": false,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "stockLevels",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StockBundle\\Entity\\StockEntry",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}"
+        },
+        {
+          "name": "parameters",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartParameter",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "metaPartParameterCriterias",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\MetaPartParameterCriteria",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "status",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "needsReview",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "partCondition",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "productionRemarks",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "createDate",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "projectParts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectPart",
+          "mapped_by": "part"
+        },
+        {
+          "name": "internalPartNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "removals",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "lowStock",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "metaPart",
+          "kind": "column",
+          "type": "boolean",
+          "options": "{ \"default\":false}"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartCategory"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "footprint",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\FootprintBundle\\Entity\\Footprint"
+        },
+        {
+          "name": "partUnit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartMeasurementUnit",
+          "inversed_by": "parts"
+        },
+        {
+          "name": "storageLocation",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation"
+        },
+        {
+          "name": "manufacturers",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartManufacturer",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "distributors",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartDistributor",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartAttachment",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "text"
+        },
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "minStockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "averagePrice",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": false,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "stockLevels",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StockBundle\\Entity\\StockEntry",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}"
+        },
+        {
+          "name": "parameters",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartParameter",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "metaPartParameterCriterias",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\MetaPartParameterCriteria",
+          "mapped_by": "part",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "status",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "needsReview",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "partCondition",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "productionRemarks",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "createDate",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "projectParts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectPart",
+          "mapped_by": "part"
+        },
+        {
+          "name": "internalPartNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "removals",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "lowStock",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "metaPart",
+          "kind": "column",
+          "type": "boolean",
+          "options": "{ \"default\":false}"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartAttachment.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartAttachment",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartAttachment",
+      "parent": "UploadedFile",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "isImage",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "attachments"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "isImage",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "attachments"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartCategory.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartCategory",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartCategory",
+      "parent": "AbstractCategory",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "indexes": "{@ORM\\Index(columns={\"lft\"}),@ORM\\Index(columns={\"rgt\"})}"
+      },
+      "target_service": "/api/part_categories",
+      "fields": [
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "PartCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "PartCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CategoryBundle\\Entity\\AbstractCategory",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "lft",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "rgt",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lvl",
+          "kind": "column",
+          "type": "integer",
+          "column_name": "lvl"
+        },
+        {
+          "name": "root",
+          "kind": "column",
+          "type": "integer",
+          "nullable": true,
+          "column_name": "root"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 128
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "PartCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "PartCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartDistributor.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartDistributor",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartDistributor",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "distributors"
+        },
+        {
+          "name": "distributor",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\DistributorBundle\\Entity\\Distributor"
+        },
+        {
+          "name": "orderNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "packagingUnit",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "price",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": true,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "currency",
+          "kind": "column",
+          "type": "string",
+          "length": 3,
+          "nullable": true
+        },
+        {
+          "name": "sku",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "ignoreForReports",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "distributors"
+        },
+        {
+          "name": "distributor",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\DistributorBundle\\Entity\\Distributor"
+        },
+        {
+          "name": "orderNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "packagingUnit",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "price",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": true,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "currency",
+          "kind": "column",
+          "type": "string",
+          "length": 3,
+          "nullable": true
+        },
+        {
+          "name": "sku",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "ignoreForReports",
+          "kind": "column",
+          "type": "boolean",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartManufacturer.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartManufacturer",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartManufacturer",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "manufacturers"
+        },
+        {
+          "name": "manufacturer",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\Manufacturer"
+        },
+        {
+          "name": "partNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "manufacturers"
+        },
+        {
+          "name": "manufacturer",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ManufacturerBundle\\Entity\\Manufacturer"
+        },
+        {
+          "name": "partNumber",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartMeasurementUnit.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartMeasurementUnit",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartMeasurementUnit",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": "PartUnit",
+      "table_extras": {
+        "name": "PartUnit"
+      },
+      "target_service": "/api/part_measurement_units",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "shortName",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "default",
+          "kind": "column",
+          "type": "boolean",
+          "column_name": "is_default"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "mapped_by": "partUnit"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "shortName",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "default",
+          "kind": "column",
+          "type": "boolean",
+          "column_name": "is_default"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "mapped_by": "partUnit"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/PartBundle/Entity/PartParameter.php",
+      "namespace": "PartKeepr\\PartBundle\\Entity",
+      "class": "PartParameter",
+      "fqcn": "PartKeepr\\PartBundle\\Entity\\PartParameter",
+      "parent": "BaseEntity",
+      "bundle": "PartBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "parameters"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "unit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\UnitBundle\\Entity\\Unit"
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "normalizedValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "maxValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true,
+          "column_name": "maximumValue"
+        },
+        {
+          "name": "normalizedMaxValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "minValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true,
+          "column_name": "minimumValue"
+        },
+        {
+          "name": "normalizedMinValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "stringValue",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "valueType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "siPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "minSiPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "maxSiPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "parameters"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "unit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\UnitBundle\\Entity\\Unit"
+        },
+        {
+          "name": "value",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "normalizedValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "maxValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true,
+          "column_name": "maximumValue"
+        },
+        {
+          "name": "normalizedMaxValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "minValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true,
+          "column_name": "minimumValue"
+        },
+        {
+          "name": "normalizedMinValue",
+          "kind": "column",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "stringValue",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "valueType",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "siPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "minSiPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        },
+        {
+          "name": "maxSiPrefix",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/Project.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "Project",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\Project",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectPart",
+          "mapped_by": "project",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectAttachment",
+          "mapped_by": "project",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectPart",
+          "mapped_by": "project",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "attachments",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectAttachment",
+          "mapped_by": "project",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ProjectAttachment.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ProjectAttachment",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ProjectAttachment",
+      "parent": "UploadedFile",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project",
+          "inversed_by": "attachments"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project",
+          "inversed_by": "attachments"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ProjectPart.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ProjectPart",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ProjectPart",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "projectParts"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project",
+          "inversed_by": "parts"
+        },
+        {
+          "name": "remarks",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "overageType",
+          "kind": "column",
+          "type": "string",
+          "options": "{ \"default\":\"\"}"
+        },
+        {
+          "name": "overage",
+          "kind": "column",
+          "type": "integer",
+          "options": "{ \"default\":0}"
+        },
+        {
+          "name": "lotNumber",
+          "kind": "column",
+          "type": "text",
+          "options": "{ \"default\":\"\"}"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "projectParts"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project",
+          "inversed_by": "parts"
+        },
+        {
+          "name": "remarks",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "overageType",
+          "kind": "column",
+          "type": "string",
+          "options": "{ \"default\":\"\"}"
+        },
+        {
+          "name": "overage",
+          "kind": "column",
+          "type": "integer",
+          "options": "{ \"default\":0}"
+        },
+        {
+          "name": "lotNumber",
+          "kind": "column",
+          "type": "text",
+          "options": "{ \"default\":\"\"}"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ProjectRun.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ProjectRun",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ProjectRun",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "runDateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectRunPart",
+          "mapped_by": "projectRun",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "runDateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "parts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectRunPart",
+          "mapped_by": "projectRun",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ProjectRunPart.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ProjectRunPart",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ProjectRunPart",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "projectRun",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectRun"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lotNumber",
+          "kind": "column",
+          "type": "text"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "projectRun",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ProjectRun"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lotNumber",
+          "kind": "column",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/Report.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "Report",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\Report",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "createDateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "reportProjects",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ReportProject",
+          "mapped_by": "report",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "reportParts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ReportPart",
+          "mapped_by": "report",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "createDateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "reportProjects",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ReportProject",
+          "mapped_by": "report",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        },
+        {
+          "name": "reportParts",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\ReportPart",
+          "mapped_by": "report",
+          "cascade": "{\"persist\", \"remove\"}",
+          "orphan_removal": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ReportPart.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ReportPart",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ReportPart",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "report",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Report",
+          "inversed_by": "reportParts"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "distributor",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\DistributorBundle\\Entity\\Distributor"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "report",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Report",
+          "inversed_by": "reportParts"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "distributor",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\DistributorBundle\\Entity\\Distributor"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/ProjectBundle/Entity/ReportProject.php",
+      "namespace": "PartKeepr\\ProjectBundle\\Entity",
+      "class": "ReportProject",
+      "fqcn": "PartKeepr\\ProjectBundle\\Entity\\ReportProject",
+      "parent": "BaseEntity",
+      "bundle": "ProjectBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "report",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Report",
+          "inversed_by": "reportProjects"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "report",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Report",
+          "inversed_by": "reportProjects"
+        },
+        {
+          "name": "project",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\ProjectBundle\\Entity\\Project"
+        },
+        {
+          "name": "quantity",
+          "kind": "column",
+          "type": "integer"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/SiPrefixBundle/Entity/SiPrefix.php",
+      "namespace": "PartKeepr\\SiPrefixBundle\\Entity",
+      "class": "SiPrefix",
+      "fqcn": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix",
+      "parent": "BaseEntity",
+      "bundle": "SiPrefixBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/si_prefixes",
+      "fields": [
+        {
+          "name": "prefix",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "kind": "column",
+          "type": "string",
+          "length": 2
+        },
+        {
+          "name": "exponent",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "base",
+          "kind": "column",
+          "type": "integer"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "prefix",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "kind": "column",
+          "type": "string",
+          "length": 2
+        },
+        {
+          "name": "exponent",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "base",
+          "kind": "column",
+          "type": "integer"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StatisticBundle/Entity/StatisticSnapshot.php",
+      "namespace": "PartKeepr\\StatisticBundle\\Entity",
+      "class": "StatisticSnapshot",
+      "fqcn": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshot",
+      "parent": null,
+      "bundle": "StatisticBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "dateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "parts",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "categories",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "units",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshotUnit",
+          "mapped_by": "statisticSnapshot",
+          "cascade": "{\"persist\", \"remove\"}"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "dateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "parts",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "categories",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "units",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshotUnit",
+          "mapped_by": "statisticSnapshot",
+          "cascade": "{\"persist\", \"remove\"}"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StatisticBundle/Entity/StatisticSnapshotUnit.php",
+      "namespace": "PartKeepr\\StatisticBundle\\Entity",
+      "class": "StatisticSnapshotUnit",
+      "fqcn": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshotUnit",
+      "parent": null,
+      "bundle": "StatisticBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "statisticSnapshot",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshot"
+        },
+        {
+          "name": "partUnit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartMeasurementUnit"
+        },
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "statisticSnapshot",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StatisticBundle\\Entity\\StatisticSnapshot"
+        },
+        {
+          "name": "partUnit",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\PartMeasurementUnit"
+        },
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StockBundle/Entity/StockEntry.php",
+      "namespace": "PartKeepr\\StockBundle\\Entity",
+      "class": "StockEntry",
+      "fqcn": "PartKeepr\\StockBundle\\Entity\\StockEntry",
+      "parent": "BaseEntity",
+      "bundle": "StockBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/stock_entries",
+      "fields": [
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "stockLevels"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        },
+        {
+          "name": "price",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": true,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "dateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "correction",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "stockLevel",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "part",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\PartBundle\\Entity\\Part",
+          "inversed_by": "stockLevels"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        },
+        {
+          "name": "price",
+          "kind": "column",
+          "type": "decimal",
+          "nullable": true,
+          "precision": 13,
+          "scale": 4
+        },
+        {
+          "name": "dateTime",
+          "kind": "column",
+          "type": "datetime"
+        },
+        {
+          "name": "correction",
+          "kind": "column",
+          "type": "boolean"
+        },
+        {
+          "name": "comment",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StorageLocationBundle/Entity/StorageLocation.php",
+      "namespace": "PartKeepr\\StorageLocationBundle\\Entity",
+      "class": "StorageLocation",
+      "fqcn": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation",
+      "parent": "BaseEntity",
+      "bundle": "StorageLocationBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/storage_locations",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "image",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationImage",
+          "mapped_by": "storageLocation"
+        },
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationCategory",
+          "inversed_by": "storageLocations"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "unique": true
+        },
+        {
+          "name": "image",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationImage",
+          "mapped_by": "storageLocation"
+        },
+        {
+          "name": "category",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationCategory",
+          "inversed_by": "storageLocations"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StorageLocationBundle/Entity/StorageLocationCategory.php",
+      "namespace": "PartKeepr\\StorageLocationBundle\\Entity",
+      "class": "StorageLocationCategory",
+      "fqcn": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationCategory",
+      "parent": "AbstractCategory",
+      "bundle": "StorageLocationBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": {
+        "indexes": "{@ORM\\Index(columns={\"lft\"}),@ORM\\Index(columns={\"rgt\"})}"
+      },
+      "target_service": "/api/storage_location_categories",
+      "fields": [
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "StorageLocationCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "StorageLocationCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "storageLocations",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation",
+          "mapped_by": "category"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CategoryBundle\\Entity\\AbstractCategory",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "lft",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "rgt",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "lvl",
+          "kind": "column",
+          "type": "integer",
+          "column_name": "lvl"
+        },
+        {
+          "name": "root",
+          "kind": "column",
+          "type": "integer",
+          "nullable": true,
+          "column_name": "root"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string",
+          "length": 128
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "parent",
+          "kind": "many_to_one",
+          "target": "StorageLocationCategory",
+          "inversed_by": "children",
+          "join_column": {
+            "name": "parent_id",
+            "referencedColumnName": "id",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "children",
+          "kind": "one_to_many",
+          "target": "StorageLocationCategory",
+          "mapped_by": "parent"
+        },
+        {
+          "name": "storageLocations",
+          "kind": "one_to_many",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation",
+          "mapped_by": "category"
+        },
+        {
+          "name": "categoryPath",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/StorageLocationBundle/Entity/StorageLocationImage.php",
+      "namespace": "PartKeepr\\StorageLocationBundle\\Entity",
+      "class": "StorageLocationImage",
+      "fqcn": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocationImage",
+      "parent": "Image",
+      "bundle": "StorageLocationBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "storageLocation",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation",
+          "inversed_by": "image"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\ImageBundle\\Entity\\Image",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "storageLocation",
+          "kind": "one_to_one",
+          "target": "PartKeepr\\StorageLocationBundle\\Entity\\StorageLocation",
+          "inversed_by": "image"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/SystemPreferenceBundle/Entity/SystemPreference.php",
+      "namespace": "PartKeepr\\SystemPreferenceBundle\\Entity",
+      "class": "SystemPreference",
+      "fqcn": "PartKeepr\\SystemPreferenceBundle\\Entity\\SystemPreference",
+      "parent": null,
+      "bundle": "SystemPreferenceBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/system_preferences",
+      "fields": [
+        {
+          "name": "preferenceKey",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "primary_key": true
+        },
+        {
+          "name": "preferenceValue",
+          "kind": "column",
+          "type": "text"
+        }
+      ],
+      "parent_fqcn": null,
+      "effective_fields": [
+        {
+          "name": "preferenceKey",
+          "kind": "column",
+          "type": "string",
+          "length": 255,
+          "primary_key": true
+        },
+        {
+          "name": "preferenceValue",
+          "kind": "column",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/TipOfTheDayBundle/Entity/TipOfTheDay.php",
+      "namespace": "PartKeepr\\TipOfTheDayBundle\\Entity",
+      "class": "TipOfTheDay",
+      "fqcn": "PartKeepr\\TipOfTheDayBundle\\Entity\\TipOfTheDay",
+      "parent": "BaseEntity",
+      "bundle": "TipOfTheDayBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/tip_of_the_days",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/TipOfTheDayBundle/Entity/TipOfTheDayHistory.php",
+      "namespace": "PartKeepr\\TipOfTheDayBundle\\Entity",
+      "class": "TipOfTheDayHistory",
+      "fqcn": "PartKeepr\\TipOfTheDayBundle\\Entity\\TipOfTheDayHistory",
+      "parent": "BaseEntity",
+      "bundle": "TipOfTheDayBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/tip_of_the_day_histories",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "user",
+          "kind": "many_to_one",
+          "target": "PartKeepr\\AuthBundle\\Entity\\User"
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/UnitBundle/Entity/Unit.php",
+      "namespace": "PartKeepr\\UnitBundle\\Entity",
+      "class": "Unit",
+      "fqcn": "PartKeepr\\UnitBundle\\Entity\\Unit",
+      "parent": "BaseEntity",
+      "bundle": "UnitBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": "/api/units",
+      "fields": [
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "prefixes",
+          "kind": "many_to_many",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix",
+          "join_table": {
+            "name": "UnitSiPrefixes",
+            "joinColumns": "{@ORM\\JoinColumn(name=\"unit_id\", referencedColumnName=\"id\")}",
+            "inverseJoinColumns": "{@ORM\\JoinColumn(name=\"siprefix_id\", referencedColumnName=\"id\")}"
+          }
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "name",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "prefixes",
+          "kind": "many_to_many",
+          "target": "PartKeepr\\SiPrefixBundle\\Entity\\SiPrefix",
+          "join_table": {
+            "name": "UnitSiPrefixes",
+            "joinColumns": "{@ORM\\JoinColumn(name=\"unit_id\", referencedColumnName=\"id\")}",
+            "inverseJoinColumns": "{@ORM\\JoinColumn(name=\"siprefix_id\", referencedColumnName=\"id\")}"
+          }
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/UploadedFileBundle/Entity/TempUploadedFile.php",
+      "namespace": "PartKeepr\\UploadedFileBundle\\Entity",
+      "class": "TempUploadedFile",
+      "fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\TempUploadedFile",
+      "parent": "UploadedFile",
+      "bundle": "UploadedFileBundle",
+      "is_entity": true,
+      "is_mapped_superclass": false,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [],
+      "parent_fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "file": "reference/PartKeepr/src/PartKeepr/UploadedFileBundle/Entity/UploadedFile.php",
+      "namespace": "PartKeepr\\UploadedFileBundle\\Entity",
+      "class": "UploadedFile",
+      "fqcn": "PartKeepr\\UploadedFileBundle\\Entity\\UploadedFile",
+      "parent": "BaseEntity",
+      "bundle": "UploadedFileBundle",
+      "is_entity": false,
+      "is_mapped_superclass": true,
+      "table_name": null,
+      "table_extras": null,
+      "target_service": null,
+      "fields": [
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        }
+      ],
+      "parent_fqcn": "PartKeepr\\CoreBundle\\Entity\\BaseEntity",
+      "effective_fields": [
+        {
+          "name": "id",
+          "kind": "column",
+          "type": "integer",
+          "primary_key": true,
+          "generated": "AUTO"
+        },
+        {
+          "name": "type",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "originalFilename",
+          "kind": "column",
+          "type": "string",
+          "nullable": true,
+          "column_name": "originalname"
+        },
+        {
+          "name": "mimetype",
+          "kind": "column",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "kind": "column",
+          "type": "integer"
+        },
+        {
+          "name": "extension",
+          "kind": "column",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "kind": "column",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created",
+          "kind": "column",
+          "type": "datetime",
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}

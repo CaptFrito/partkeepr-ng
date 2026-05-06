@@ -1,0 +1,47 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::json;
+
+/// Common error type for hand-written handlers. Codegen handlers in
+/// `models/` use a different (older) `(StatusCode, String)` shape; that's
+/// fine — they're list-only stubs and will be retired as features replace
+/// them.
+pub enum AppError {
+    NotFound(&'static str),
+    BadRequest(&'static str),
+    Db(sqlx::Error),
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(e: sqlx::Error) -> Self {
+        AppError::Db(e)
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        match self {
+            AppError::NotFound(what) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("{what} not found")})),
+            )
+                .into_response(),
+            AppError::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": msg})),
+            )
+                .into_response(),
+            AppError::Db(e) => {
+                tracing::error!(error = %e, "database error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "internal error"})),
+                )
+                    .into_response()
+            }
+        }
+    }
+}

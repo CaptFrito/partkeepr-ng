@@ -1,0 +1,901 @@
+[
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807949",
+    "pull_request_review_id": null,
+    "id": 807949,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDgwNzk0OQ==",
+    "diff_hunk": "@@ -3,7 +3,6 @@ Ext.define(\"PartKeepr.CategoryTree\", {\n \textend: 'Ext.tree.Panel',\n \tcategoryService: null,\n \tcategoryModel: null,\n-\tdisplayField: 'name',",
+    "path": "src/frontend/js/Components/CategoryTree.js",
+    "commit_id": "420647c8d4bea2c838a116ec442d9763e3d1fe41",
+    "original_commit_id": "de71554ac76295bc087ac9afc440b35060994e72",
+    "user": {
+      "login": "scrupeus",
+      "id": 1670578,
+      "node_id": "MDQ6VXNlcjE2NzA1Nzg=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1670578?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/scrupeus",
+      "html_url": "https://github.com/scrupeus",
+      "followers_url": "https://api.github.com/users/scrupeus/followers",
+      "following_url": "https://api.github.com/users/scrupeus/following{/other_user}",
+      "gists_url": "https://api.github.com/users/scrupeus/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/scrupeus/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/scrupeus/subscriptions",
+      "organizations_url": "https://api.github.com/users/scrupeus/orgs",
+      "repos_url": "https://api.github.com/users/scrupeus/repos",
+      "events_url": "https://api.github.com/users/scrupeus/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/scrupeus/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Not required as 'text' field is used below but 'text' is the default for a tree panel\n",
+    "created_at": "2012-05-11T11:06:45Z",
+    "updated_at": "2012-05-11T12:12:32Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/173#discussion_r807949",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/173",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807949"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/173#discussion_r807949"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/173"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807949/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": 6,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "CONTRIBUTOR",
+    "original_position": 4,
+    "position": 4,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807954",
+    "pull_request_review_id": null,
+    "id": 807954,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDgwNzk1NA==",
+    "diff_hunk": "@@ -63,9 +62,17 @@ Ext.define(\"PartKeepr.CategoryTree\", {\n \t\treturn ret;\n \t},\n \tbuildCategoryTree : function(root, data, expandedNodes) {\n+\t\tvar label;\n+\t\tif ((data.id > 1) && (PartKeepr.getApplication().getUserPreference(\"partkeepr.categorytree.showdescriptions\") === true)) {\n+\t\t\tlabel = data.name + \" - \" + data.description;\n+\t\t} else {\n+\t\t\tlabel = data.name;\n+\t\t}\n \t\tvar nodeData = {\n \t\t\tid :  data.id,\n \t\t\tname : data.name,\n+\t\t\tdescription : data.description,",
+    "path": "src/frontend/js/Components/CategoryTree.js",
+    "commit_id": "420647c8d4bea2c838a116ec442d9763e3d1fe41",
+    "original_commit_id": "de71554ac76295bc087ac9afc440b35060994e72",
+    "user": {
+      "login": "scrupeus",
+      "id": 1670578,
+      "node_id": "MDQ6VXNlcjE2NzA1Nzg=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1670578?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/scrupeus",
+      "html_url": "https://github.com/scrupeus",
+      "followers_url": "https://api.github.com/users/scrupeus/followers",
+      "following_url": "https://api.github.com/users/scrupeus/following{/other_user}",
+      "gists_url": "https://api.github.com/users/scrupeus/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/scrupeus/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/scrupeus/subscriptions",
+      "organizations_url": "https://api.github.com/users/scrupeus/orgs",
+      "repos_url": "https://api.github.com/users/scrupeus/repos",
+      "events_url": "https://api.github.com/users/scrupeus/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/scrupeus/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "This was missing from trunk/mainline - meant the description was not displayed in the category editor\n",
+    "created_at": "2012-05-11T11:07:29Z",
+    "updated_at": "2012-05-11T12:12:32Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/173#discussion_r807954",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/173",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807954"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/173#discussion_r807954"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/173"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/807954/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": 74,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "CONTRIBUTOR",
+    "original_position": 21,
+    "position": 21,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/34025219",
+    "pull_request_review_id": null,
+    "id": 34025219,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDM0MDI1MjE5",
+    "diff_hunk": "@@ -81,7 +82,7 @@ class Manufacturer extends BaseEntity\n \n     /**\n      * All ic logos of this manufacturer\n-     * @ORM\\OneToMany(targetEntity=\"PartKeepr\\ManufacturerBundle\\Entity\\ManufacturerICLogo\",mappedBy=\"manufacturer\",cascade={\"persist\",\"remove\"})\n+     * @ORM\\OneToMany(targetEntity=\"PartKeepr\\ManufacturerBundle\\Entity\\ManufacturerICLogo\",mappedBy=\"manufacturer\",cascade={\"persist\", \"remove\"}, orphanRemoval=true)",
+    "path": "src/PartKeepr/ManufacturerBundle/Entity/Manufacturer.php",
+    "commit_id": "6123a4c1c3b54712ca177b7ff42963888765a6fd",
+    "original_commit_id": "6123a4c1c3b54712ca177b7ff42963888765a6fd",
+    "user": {
+      "login": "dunglas",
+      "id": 57224,
+      "node_id": "MDQ6VXNlcjU3MjI0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57224?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/dunglas",
+      "html_url": "https://github.com/dunglas",
+      "followers_url": "https://api.github.com/users/dunglas/followers",
+      "following_url": "https://api.github.com/users/dunglas/following{/other_user}",
+      "gists_url": "https://api.github.com/users/dunglas/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/dunglas/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/dunglas/subscriptions",
+      "organizations_url": "https://api.github.com/users/dunglas/orgs",
+      "repos_url": "https://api.github.com/users/dunglas/repos",
+      "events_url": "https://api.github.com/users/dunglas/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/dunglas/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Not sure if removing orphans is the desired behavior.\n",
+    "created_at": "2015-07-07T10:08:36Z",
+    "updated_at": "2015-07-07T10:08:36Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/409#discussion_r34025219",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/409",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/34025219"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/409#discussion_r34025219"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/409"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/34025219/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": 85,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "CONTRIBUTOR",
+    "original_position": 13,
+    "position": 13,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778105",
+    "pull_request_review_id": null,
+    "id": 53778105,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDUzNzc4MTA1",
+    "diff_hunk": "@@ -823,24 +823,40 @@ public function recomputeStockLevels()\n     {\n         $sum = 0;\n         $price = 0;\n+\t\t\n+\t\t$totalPartStockPrice = 0;\n+        $lastPosEntryQuant = 0;\n+        $lastPosEntryPrice = 0;\n \n         foreach ($this->getStockLevels() as $stockLevel) {\n-\n-            if ($stockLevel->getStockLevel() < 0) {\n-                $this->setRemovals(true);\n-            } else {\n-                $price += $stockLevel->getPrice() * $stockLevel->getStockLevel();\n-            }\n-            $sum += $stockLevel->getStockLevel();\n-        }\n-\n-        if ($sum > 0) {\n-            $this->setAveragePrice($price / $sum);\n-        } else {\n-            $this->setAveragePrice(0);\n-        }\n+\t\t\t\n+\t\t\t$sum += $stockLevel->getStockLevel();\n+\t\t\t\n+\t\t\tif ($stockLevel->getStockLevel() > 0) {\n+\t\t\t\t$lastPosEntryQuant = $stockLevel->getStockLevel();\n+\t\t\t\t$lastPosEntryPrice = $stockLevel->getPrice();\n+\t\t\t\t$totalPartStockPrice += $lastPosEntryPrice * $lastPosEntryQuant;\n+\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t}\n+\t\t\telse {\n+\t\t\t\tif  ($sum < 0) {\n+\t\t\t\t\t$price = 0;\n+\t\t\t\t\t//$sum = 0;",
+    "path": "src/PartKeepr/PartBundle/Entity/Part.php",
+    "commit_id": "bc8023f25fd65e1117a5a60c449b3e31c5bc9f70",
+    "original_commit_id": "fe8c838602197ffdca85c30d5afe5c923281264e",
+    "user": {
+      "login": "Drachenkaetzchen",
+      "id": 162974,
+      "node_id": "MDQ6VXNlcjE2Mjk3NA==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/162974?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Drachenkaetzchen",
+      "html_url": "https://github.com/Drachenkaetzchen",
+      "followers_url": "https://api.github.com/users/Drachenkaetzchen/followers",
+      "following_url": "https://api.github.com/users/Drachenkaetzchen/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Drachenkaetzchen/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Drachenkaetzchen/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Drachenkaetzchen/subscriptions",
+      "organizations_url": "https://api.github.com/users/Drachenkaetzchen/orgs",
+      "repos_url": "https://api.github.com/users/Drachenkaetzchen/repos",
+      "events_url": "https://api.github.com/users/Drachenkaetzchen/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Drachenkaetzchen/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Please don't commit commented out lines\n",
+    "created_at": "2016-02-23T13:20:08Z",
+    "updated_at": "2016-02-26T13:57:25Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r53778105",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778105"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r53778105"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778105/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "MEMBER",
+    "original_position": 36,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778368",
+    "pull_request_review_id": null,
+    "id": 53778368,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDUzNzc4MzY4",
+    "diff_hunk": "@@ -823,24 +823,40 @@ public function recomputeStockLevels()\n     {\n         $sum = 0;\n         $price = 0;\n+\t\t\n+\t\t$totalPartStockPrice = 0;\n+        $lastPosEntryQuant = 0;\n+        $lastPosEntryPrice = 0;\n \n         foreach ($this->getStockLevels() as $stockLevel) {\n-\n-            if ($stockLevel->getStockLevel() < 0) {\n-                $this->setRemovals(true);\n-            } else {\n-                $price += $stockLevel->getPrice() * $stockLevel->getStockLevel();\n-            }\n-            $sum += $stockLevel->getStockLevel();\n-        }\n-\n-        if ($sum > 0) {\n-            $this->setAveragePrice($price / $sum);\n-        } else {\n-            $this->setAveragePrice(0);\n-        }\n+\t\t\t\n+\t\t\t$sum += $stockLevel->getStockLevel();\n+\t\t\t\n+\t\t\tif ($stockLevel->getStockLevel() > 0) {\n+\t\t\t\t$lastPosEntryQuant = $stockLevel->getStockLevel();\n+\t\t\t\t$lastPosEntryPrice = $stockLevel->getPrice();\n+\t\t\t\t$totalPartStockPrice += $lastPosEntryPrice * $lastPosEntryQuant;\n+\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t}\n+\t\t\telse {\n+\t\t\t\tif  ($sum < 0) {\n+\t\t\t\t\t$price = 0;\n+\t\t\t\t\t//$sum = 0;\n+\t\t\t\t}\n+\t\t\t\telse\n+\t\t\t\t\tif ($sum < $lastPosEntryQuant){\n+\t\t\t\t\t\t$totalPartStockPrice = $sum * $lastPosEntryPrice;\n+\t\t\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t\t\t}\n+\t\t\t\t\telse {\n+\t\t\t\t\t\t$totalPartStockPrice += $stockLevel->getStockLevel() * $price;\n+\t\t\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t\t\t}\n+\t\t\t}\n+\t\t}\n \n         $this->setStockLevel($sum);\n+\t\t$this->setAveragePrice($price);",
+    "path": "src/PartKeepr/PartBundle/Entity/Part.php",
+    "commit_id": "bc8023f25fd65e1117a5a60c449b3e31c5bc9f70",
+    "original_commit_id": "fe8c838602197ffdca85c30d5afe5c923281264e",
+    "user": {
+      "login": "Drachenkaetzchen",
+      "id": 162974,
+      "node_id": "MDQ6VXNlcjE2Mjk3NA==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/162974?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Drachenkaetzchen",
+      "html_url": "https://github.com/Drachenkaetzchen",
+      "followers_url": "https://api.github.com/users/Drachenkaetzchen/followers",
+      "following_url": "https://api.github.com/users/Drachenkaetzchen/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Drachenkaetzchen/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Drachenkaetzchen/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Drachenkaetzchen/subscriptions",
+      "organizations_url": "https://api.github.com/users/Drachenkaetzchen/orgs",
+      "repos_url": "https://api.github.com/users/Drachenkaetzchen/repos",
+      "events_url": "https://api.github.com/users/Drachenkaetzchen/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Drachenkaetzchen/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Indentation wrong, please follow [PSR-2](https://github.com/php-fig/fig-standards/blob/master/accepted/PSR-2-coding-style-guide.md) for coding standards. You can use the [php-cs-fixer](http://cs.sensiolabs.org/) to fix the coding style.\n\nYes, I'm aware that most files don't follow the PSR-2 yet, but all newly commited files should follow the standard ;)\n",
+    "created_at": "2016-02-23T13:22:45Z",
+    "updated_at": "2016-02-26T13:57:25Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r53778368",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778368"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r53778368"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/53778368/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "MEMBER",
+    "original_position": 51,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245188",
+    "pull_request_review_id": null,
+    "id": 54245188,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDU0MjQ1MTg4",
+    "diff_hunk": "@@ -823,24 +823,40 @@ public function recomputeStockLevels()\n     {\n         $sum = 0;\n         $price = 0;\n+\t\t\n+\t\t$totalPartStockPrice = 0;\n+        $lastPosEntryQuant = 0;\n+        $lastPosEntryPrice = 0;\n \n         foreach ($this->getStockLevels() as $stockLevel) {\n-\n-            if ($stockLevel->getStockLevel() < 0) {\n-                $this->setRemovals(true);\n-            } else {\n-                $price += $stockLevel->getPrice() * $stockLevel->getStockLevel();\n-            }\n-            $sum += $stockLevel->getStockLevel();\n-        }\n-\n-        if ($sum > 0) {\n-            $this->setAveragePrice($price / $sum);\n-        } else {\n-            $this->setAveragePrice(0);\n-        }\n+\t\t\t\n+\t\t\t$sum += $stockLevel->getStockLevel();\n+\t\t\t\n+\t\t\tif ($stockLevel->getStockLevel() > 0) {\n+\t\t\t\t$lastPosEntryQuant = $stockLevel->getStockLevel();\n+\t\t\t\t$lastPosEntryPrice = $stockLevel->getPrice();\n+\t\t\t\t$totalPartStockPrice += $lastPosEntryPrice * $lastPosEntryQuant;\n+\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t}\n+\t\t\telse {\n+\t\t\t\tif  ($sum < 0) {\n+\t\t\t\t\t$price = 0;\n+\t\t\t\t\t//$sum = 0;\n+\t\t\t\t}\n+\t\t\t\telse\n+\t\t\t\t\tif ($sum < $lastPosEntryQuant){\n+\t\t\t\t\t\t$totalPartStockPrice = $sum * $lastPosEntryPrice;\n+\t\t\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t\t\t}\n+\t\t\t\t\telse {\n+\t\t\t\t\t\t$totalPartStockPrice += $stockLevel->getStockLevel() * $price;\n+\t\t\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t\t\t}\n+\t\t\t}\n+\t\t}\n \n         $this->setStockLevel($sum);\n+\t\t$this->setAveragePrice($price);",
+    "path": "src/PartKeepr/PartBundle/Entity/Part.php",
+    "commit_id": "bc8023f25fd65e1117a5a60c449b3e31c5bc9f70",
+    "original_commit_id": "fe8c838602197ffdca85c30d5afe5c923281264e",
+    "user": {
+      "login": "tinutac",
+      "id": 2151553,
+      "node_id": "MDQ6VXNlcjIxNTE1NTM=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2151553?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/tinutac",
+      "html_url": "https://github.com/tinutac",
+      "followers_url": "https://api.github.com/users/tinutac/followers",
+      "following_url": "https://api.github.com/users/tinutac/following{/other_user}",
+      "gists_url": "https://api.github.com/users/tinutac/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/tinutac/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/tinutac/subscriptions",
+      "organizations_url": "https://api.github.com/users/tinutac/orgs",
+      "repos_url": "https://api.github.com/users/tinutac/repos",
+      "events_url": "https://api.github.com/users/tinutac/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/tinutac/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Should be ok now. My editor was simply on another coding standard :)\n",
+    "created_at": "2016-02-26T13:57:51Z",
+    "updated_at": "2016-02-26T13:57:51Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r54245188",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245188"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r54245188"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245188/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "CONTRIBUTOR",
+    "original_position": 51,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245237",
+    "pull_request_review_id": null,
+    "id": 54245237,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDU0MjQ1MjM3",
+    "diff_hunk": "@@ -823,24 +823,40 @@ public function recomputeStockLevels()\n     {\n         $sum = 0;\n         $price = 0;\n+\t\t\n+\t\t$totalPartStockPrice = 0;\n+        $lastPosEntryQuant = 0;\n+        $lastPosEntryPrice = 0;\n \n         foreach ($this->getStockLevels() as $stockLevel) {\n-\n-            if ($stockLevel->getStockLevel() < 0) {\n-                $this->setRemovals(true);\n-            } else {\n-                $price += $stockLevel->getPrice() * $stockLevel->getStockLevel();\n-            }\n-            $sum += $stockLevel->getStockLevel();\n-        }\n-\n-        if ($sum > 0) {\n-            $this->setAveragePrice($price / $sum);\n-        } else {\n-            $this->setAveragePrice(0);\n-        }\n+\t\t\t\n+\t\t\t$sum += $stockLevel->getStockLevel();\n+\t\t\t\n+\t\t\tif ($stockLevel->getStockLevel() > 0) {\n+\t\t\t\t$lastPosEntryQuant = $stockLevel->getStockLevel();\n+\t\t\t\t$lastPosEntryPrice = $stockLevel->getPrice();\n+\t\t\t\t$totalPartStockPrice += $lastPosEntryPrice * $lastPosEntryQuant;\n+\t\t\t\t$price = $totalPartStockPrice / $sum;\n+\t\t\t}\n+\t\t\telse {\n+\t\t\t\tif  ($sum < 0) {\n+\t\t\t\t\t$price = 0;\n+\t\t\t\t\t//$sum = 0;",
+    "path": "src/PartKeepr/PartBundle/Entity/Part.php",
+    "commit_id": "bc8023f25fd65e1117a5a60c449b3e31c5bc9f70",
+    "original_commit_id": "fe8c838602197ffdca85c30d5afe5c923281264e",
+    "user": {
+      "login": "tinutac",
+      "id": 2151553,
+      "node_id": "MDQ6VXNlcjIxNTE1NTM=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2151553?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/tinutac",
+      "html_url": "https://github.com/tinutac",
+      "followers_url": "https://api.github.com/users/tinutac/followers",
+      "following_url": "https://api.github.com/users/tinutac/following{/other_user}",
+      "gists_url": "https://api.github.com/users/tinutac/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/tinutac/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/tinutac/subscriptions",
+      "organizations_url": "https://api.github.com/users/tinutac/orgs",
+      "repos_url": "https://api.github.com/users/tinutac/repos",
+      "events_url": "https://api.github.com/users/tinutac/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/tinutac/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Removed it completely.\n",
+    "created_at": "2016-02-26T13:58:08Z",
+    "updated_at": "2016-02-26T13:58:08Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r54245237",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245237"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/601#discussion_r54245237"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/601"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/54245237/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "CONTRIBUTOR",
+    "original_position": 36,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/60919927",
+    "pull_request_review_id": null,
+    "id": 60919927,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDYwOTE5OTI3",
+    "diff_hunk": "@@ -294,6 +294,12 @@ Ext.define('PartKeepr.PartsGrid', {\n                 header: i18n(\"Create Date\"),\n                 dataIndex: 'createDate',\n                 hidden: true\n+            }, {\n+                header: i18n(\"Internal ID\"),\n+                dataIndex: 'id',\n+                //renderer: Ext.util.Format.htmlEncode,",
+    "path": "src/PartKeepr/FrontendBundle/Resources/public/js/Components/Part/PartsGrid.js",
+    "commit_id": "44930bb3a8cb6b154d171cb023cb9c69c8b0cb9c",
+    "original_commit_id": "e050243370244fae79993e8b55fee581995e60c4",
+    "user": {
+      "login": "Drachenkaetzchen",
+      "id": 162974,
+      "node_id": "MDQ6VXNlcjE2Mjk3NA==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/162974?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Drachenkaetzchen",
+      "html_url": "https://github.com/Drachenkaetzchen",
+      "followers_url": "https://api.github.com/users/Drachenkaetzchen/followers",
+      "following_url": "https://api.github.com/users/Drachenkaetzchen/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Drachenkaetzchen/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Drachenkaetzchen/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Drachenkaetzchen/subscriptions",
+      "organizations_url": "https://api.github.com/users/Drachenkaetzchen/orgs",
+      "repos_url": "https://api.github.com/users/Drachenkaetzchen/repos",
+      "events_url": "https://api.github.com/users/Drachenkaetzchen/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Drachenkaetzchen/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Please removed commented out code\n",
+    "created_at": "2016-04-25T14:18:00Z",
+    "updated_at": "2016-08-16T10:21:24Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/645#discussion_r60919927",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/645",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/60919927"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/645#discussion_r60919927"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/645"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/60919927/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": null,
+    "side": "RIGHT",
+    "author_association": "MEMBER",
+    "original_position": 7,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861211",
+    "pull_request_review_id": 137638750,
+    "id": 202861211,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDIwMjg2MTIxMQ==",
+    "diff_hunk": "@@ -103,8 +103,11 @@ public function getName()\n      */\n     public function setName($name)\n     {\n-        $this->name = $name;\n-\n+        if ($name != NULL) {\n+            $this->name = $name;\n+        } else {\n+            $this->name = 'NewReport';",
+    "path": "src/PartKeepr/ProjectBundle/Entity/Report.php",
+    "commit_id": "1f8e2b34b4918dbbb9b2219d529b62c0c871509d",
+    "original_commit_id": "32fb6b1580c3f99d8431d005c5b635455b19da94",
+    "user": {
+      "login": "Drachenkaetzchen",
+      "id": 162974,
+      "node_id": "MDQ6VXNlcjE2Mjk3NA==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/162974?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Drachenkaetzchen",
+      "html_url": "https://github.com/Drachenkaetzchen",
+      "followers_url": "https://api.github.com/users/Drachenkaetzchen/followers",
+      "following_url": "https://api.github.com/users/Drachenkaetzchen/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Drachenkaetzchen/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Drachenkaetzchen/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Drachenkaetzchen/subscriptions",
+      "organizations_url": "https://api.github.com/users/Drachenkaetzchen/orgs",
+      "repos_url": "https://api.github.com/users/Drachenkaetzchen/repos",
+      "events_url": "https://api.github.com/users/Drachenkaetzchen/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Drachenkaetzchen/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Can you add i18n please? Otherwise once i18n will be implemented, we would never find that spot again",
+    "created_at": "2018-07-17T00:02:30Z",
+    "updated_at": "2018-07-17T00:24:50Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202861211",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861211"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202861211"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861211/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": 109,
+    "side": "RIGHT",
+    "author_association": "MEMBER",
+    "original_position": 9,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861373",
+    "pull_request_review_id": 137638927,
+    "id": 202861373,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDIwMjg2MTM3Mw==",
+    "diff_hunk": "@@ -103,8 +103,11 @@ public function getName()\n      */\n     public function setName($name)\n     {\n-        $this->name = $name;\n-\n+        if ($name != NULL) {\n+            $this->name = $name;\n+        } else {\n+            $this->name = 'NewReport';",
+    "path": "src/PartKeepr/ProjectBundle/Entity/Report.php",
+    "commit_id": "1f8e2b34b4918dbbb9b2219d529b62c0c871509d",
+    "original_commit_id": "32fb6b1580c3f99d8431d005c5b635455b19da94",
+    "user": {
+      "login": "Drachenkaetzchen",
+      "id": 162974,
+      "node_id": "MDQ6VXNlcjE2Mjk3NA==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/162974?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Drachenkaetzchen",
+      "html_url": "https://github.com/Drachenkaetzchen",
+      "followers_url": "https://api.github.com/users/Drachenkaetzchen/followers",
+      "following_url": "https://api.github.com/users/Drachenkaetzchen/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Drachenkaetzchen/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Drachenkaetzchen/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Drachenkaetzchen/subscriptions",
+      "organizations_url": "https://api.github.com/users/Drachenkaetzchen/orgs",
+      "repos_url": "https://api.github.com/users/Drachenkaetzchen/repos",
+      "events_url": "https://api.github.com/users/Drachenkaetzchen/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Drachenkaetzchen/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Just a comment with // @todo i18n is enough\r\n",
+    "created_at": "2018-07-17T00:03:31Z",
+    "updated_at": "2018-07-17T00:24:50Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202861373",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861373"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202861373"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202861373/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": 109,
+    "side": "RIGHT",
+    "in_reply_to_id": 202861211,
+    "author_association": "MEMBER",
+    "original_position": 9,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202864487",
+    "pull_request_review_id": 137642311,
+    "id": 202864487,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDIwMjg2NDQ4Nw==",
+    "diff_hunk": "@@ -103,8 +103,11 @@ public function getName()\n      */\n     public function setName($name)\n     {\n-        $this->name = $name;\n-\n+        if ($name != NULL) {\n+            $this->name = $name;\n+        } else {\n+            $this->name = 'NewReport';",
+    "path": "src/PartKeepr/ProjectBundle/Entity/Report.php",
+    "commit_id": "1f8e2b34b4918dbbb9b2219d529b62c0c871509d",
+    "original_commit_id": "32fb6b1580c3f99d8431d005c5b635455b19da94",
+    "user": {
+      "login": "vmw",
+      "id": 11546216,
+      "node_id": "MDQ6VXNlcjExNTQ2MjE2",
+      "avatar_url": "https://avatars.githubusercontent.com/u/11546216?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/vmw",
+      "html_url": "https://github.com/vmw",
+      "followers_url": "https://api.github.com/users/vmw/followers",
+      "following_url": "https://api.github.com/users/vmw/following{/other_user}",
+      "gists_url": "https://api.github.com/users/vmw/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/vmw/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/vmw/subscriptions",
+      "organizations_url": "https://api.github.com/users/vmw/orgs",
+      "repos_url": "https://api.github.com/users/vmw/repos",
+      "events_url": "https://api.github.com/users/vmw/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/vmw/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Added it now; I didn't look close enough to see how to actually add it, so I just added the i18n todo tag.",
+    "created_at": "2018-07-17T00:25:58Z",
+    "updated_at": "2018-07-17T00:25:58Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202864487",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202864487"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/985#discussion_r202864487"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/985"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/202864487/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": 109,
+    "side": "RIGHT",
+    "in_reply_to_id": 202861211,
+    "author_association": "CONTRIBUTOR",
+    "original_position": 9,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636876",
+    "pull_request_review_id": 521235658,
+    "id": 515636876,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDUxNTYzNjg3Ng==",
+    "diff_hunk": "@@ -152,15 +158,36 @@ Ext.define(\"PartKeepr.Components.OctoPart.DataApplicator\", {\n             }\n         }\n \n-        if (this.import.cadModels)\n+/*        if (this.import.datasheets)",
+    "path": "src/PartKeepr/FrontendBundle/Resources/public/js/Components/OctoPart/DataApplicator.js",
+    "commit_id": "4edae1a72ccb7135e1e3d670b38a3e636d743c55",
+    "original_commit_id": "165e3a9a75f7568e4aacf241edc8a52004c773c5",
+    "user": {
+      "login": "christianlupus",
+      "id": 8202922,
+      "node_id": "MDQ6VXNlcjgyMDI5MjI=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8202922?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/christianlupus",
+      "html_url": "https://github.com/christianlupus",
+      "followers_url": "https://api.github.com/users/christianlupus/followers",
+      "following_url": "https://api.github.com/users/christianlupus/following{/other_user}",
+      "gists_url": "https://api.github.com/users/christianlupus/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/christianlupus/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/christianlupus/subscriptions",
+      "organizations_url": "https://api.github.com/users/christianlupus/orgs",
+      "repos_url": "https://api.github.com/users/christianlupus/repos",
+      "events_url": "https://api.github.com/users/christianlupus/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/christianlupus/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "You might want to remove this obsolete code fragment.",
+    "created_at": "2020-11-01T15:40:29Z",
+    "updated_at": "2020-11-07T10:36:59Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/1150#discussion_r515636876",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/1150",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636876"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/1150#discussion_r515636876"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/1150"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636876/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": 161,
+    "side": "RIGHT",
+    "author_association": "COLLABORATOR",
+    "original_position": 102,
+    "position": 1,
+    "subject_type": "line"
+  },
+  {
+    "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636913",
+    "pull_request_review_id": 521235681,
+    "id": 515636913,
+    "node_id": "MDI0OlB1bGxSZXF1ZXN0UmV2aWV3Q29tbWVudDUxNTYzNjkxMw==",
+    "diff_hunk": "@@ -170,7 +197,7 @@ Ext.define(\"PartKeepr.Components.OctoPart.DataApplicator\", {\n             }\n         }\n \n-        if (this.import.complianceDocuments)\n+/*        if (this.import.complianceDocuments)",
+    "path": "src/PartKeepr/FrontendBundle/Resources/public/js/Components/OctoPart/DataApplicator.js",
+    "commit_id": "4edae1a72ccb7135e1e3d670b38a3e636d743c55",
+    "original_commit_id": "165e3a9a75f7568e4aacf241edc8a52004c773c5",
+    "user": {
+      "login": "christianlupus",
+      "id": 8202922,
+      "node_id": "MDQ6VXNlcjgyMDI5MjI=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8202922?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/christianlupus",
+      "html_url": "https://github.com/christianlupus",
+      "followers_url": "https://api.github.com/users/christianlupus/followers",
+      "following_url": "https://api.github.com/users/christianlupus/following{/other_user}",
+      "gists_url": "https://api.github.com/users/christianlupus/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/christianlupus/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/christianlupus/subscriptions",
+      "organizations_url": "https://api.github.com/users/christianlupus/orgs",
+      "repos_url": "https://api.github.com/users/christianlupus/repos",
+      "events_url": "https://api.github.com/users/christianlupus/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/christianlupus/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Here, too, you could remove this block comment.",
+    "created_at": "2020-11-01T15:40:49Z",
+    "updated_at": "2020-11-07T10:36:59Z",
+    "html_url": "https://github.com/partkeepr/PartKeepr/pull/1150#discussion_r515636913",
+    "pull_request_url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/1150",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636913"
+      },
+      "html": {
+        "href": "https://github.com/partkeepr/PartKeepr/pull/1150#discussion_r515636913"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/1150"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/partkeepr/PartKeepr/pulls/comments/515636913/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": null,
+    "original_line": 200,
+    "side": "RIGHT",
+    "author_association": "COLLABORATOR",
+    "original_position": 144,
+    "position": 1,
+    "subject_type": "line"
+  }
+]

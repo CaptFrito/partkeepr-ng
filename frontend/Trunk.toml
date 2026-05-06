@@ -1,0 +1,8 @@
+[serve]
+# Backend already binds 8080; frontend dev server uses 8081 to avoid collision.
+port = 8081
+address = "127.0.0.1"
+
+[build]
+# Default release/dev mode, output to ./dist
+target = "index.html"
