@@ -42,17 +42,51 @@ pub async fn create_stock_entry(
     }
 
     let mut tx = pool.begin().await?;
+    apply_stock_change_in_tx(
+        &mut tx,
+        part_id,
+        req.stock_level,
+        req.price,
+        req.comment.as_deref(),
+        req.correction,
+    )
+    .await?;
+    let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
+        .bind(part_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(updated))
+}
 
-    // Confirm part exists; we need min_stock_level for the lowStock flag.
+/// Insert a StockEntry and re-derive `Part.stockLevel` /
+/// `averagePrice` / `lowStock`. Reused by the project-run handler so a
+/// run's per-line stock decrements use exactly the same accounting as
+/// manual stock add/remove. Caller owns the transaction.
+///
+/// Returns (current_stock_after, low_stock_after) for convenience —
+/// run_project surfaces these in the response so the UI can confirm
+/// shortfalls without a second roundtrip.
+pub async fn apply_stock_change_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    part_id: i32,
+    delta: i32,
+    price: Option<Decimal>,
+    comment: Option<&str>,
+    correction: bool,
+) -> Result<(i32, bool), AppError> {
+    if delta == 0 {
+        return Err(AppError::BadRequest("stock delta cannot be zero"));
+    }
+
     let exists: Option<(i32, i32)> = sqlx::query_as(
         "SELECT id, minStockLevel FROM Part WHERE id = ?",
     )
     .bind(part_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let (_, min_stock_level) = exists.ok_or(AppError::NotFound("part"))?;
 
-    // Insert the new stock entry. user_id is NULL until auth lands.
     let now = Utc::now().naive_utc();
     sqlx::query(
         "INSERT INTO StockEntry \
@@ -60,21 +94,20 @@ pub async fn create_stock_entry(
          VALUES (?, NULL, ?, ?, ?, ?, ?)",
     )
     .bind(part_id)
-    .bind(req.stock_level)
-    .bind(req.price)
+    .bind(delta)
+    .bind(price)
     .bind(now)
-    .bind(req.correction)
-    .bind(&req.comment)
-    .execute(&mut *tx)
+    .bind(correction)
+    .bind(comment)
+    .execute(&mut **tx)
     .await?;
 
-    // Re-derive aggregates from the full stock history (ordered by date).
     let entries: Vec<(i32, Option<Decimal>, bool)> = sqlx::query_as(
         "SELECT stockLevel, price, correction FROM StockEntry \
          WHERE part_id = ? ORDER BY dateTime ASC, id ASC",
     )
     .bind(part_id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
 
     let (current_stock, avg_price) = recompute(&entries);
@@ -88,16 +121,10 @@ pub async fn create_stock_entry(
     .bind(avg_price)
     .bind(low_stock)
     .bind(part_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
-    let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
-        .bind(part_id)
-        .fetch_one(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
-    Ok(Json(updated))
+    Ok((current_stock, low_stock))
 }
 
 /// Walk chronological stock entries to derive current stock + avg price.

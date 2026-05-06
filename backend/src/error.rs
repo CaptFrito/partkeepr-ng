@@ -12,6 +12,10 @@ use serde_json::json;
 pub enum AppError {
     NotFound(&'static str),
     BadRequest(&'static str),
+    /// 409 with a structured JSON body — used by delete handlers that
+    /// hard-block on outstanding references and need to report counts so
+    /// the UI can render an actionable message.
+    Conflict(serde_json::Value),
     Db(sqlx::Error),
 }
 
@@ -34,6 +38,7 @@ impl IntoResponse for AppError {
                 Json(json!({"error": msg})),
             )
                 .into_response(),
+            AppError::Conflict(body) => (StatusCode::CONFLICT, Json(body)).into_response(),
             AppError::Db(e) => {
                 tracing::error!(error = %e, "database error");
                 (

@@ -1,10 +1,12 @@
 use leptos::prelude::*;
 
 use crate::api;
-use crate::types::{CategoryNode, PartRow};
+use crate::components::ParametricFilter;
+use crate::types::{CategoryNode, FootprintTreeNode, PartRow, StorageTreeNode};
 use crate::{
-    DataVersion, EditorMode, EditorModeState, Offset, Search, SelectedCategory,
-    SelectedPart, Sort,
+    DataVersion, EditorMode, EditorModeState, FootprintSelection, LeftPaneMode,
+    LeftPaneModeState, MetaFilter, MetaFilterState, Offset, PredicatesState, Search,
+    SelectedCategory, SelectedFootprint, SelectedPart, SelectedStorage, Sort, StorageSelection,
 };
 
 const PAGE_SIZE: u32 = 50;
@@ -12,16 +14,54 @@ const PAGE_SIZE: u32 = 50;
 #[component]
 pub fn PartsGrid() -> impl IntoView {
     let selected_category = expect_context::<SelectedCategory>().0;
+    let selected_storage = expect_context::<SelectedStorage>().0;
+    let selected_footprint = expect_context::<SelectedFootprint>().0;
+    let pane_mode = expect_context::<LeftPaneModeState>().0;
     let _selected_part = expect_context::<SelectedPart>().0; // PartRowView reads
     let search = expect_context::<Search>().0;
     let offset = expect_context::<Offset>().0;
     let sort = expect_context::<Sort>().0;
     let data_version = expect_context::<DataVersion>().0;
     let editor_mode = expect_context::<EditorModeState>().0;
+    let predicates = expect_context::<PredicatesState>().0;
+    let meta_filter = expect_context::<MetaFilterState>().0;
 
-    // Reset pagination when category, search, or sort changes.
-    Effect::new(move |prev: Option<(Option<i32>, String, (String, bool))>| {
-        let cur = (selected_category.get(), search.get(), sort.get());
+    /// (category, storage_folder, storage_location, footprint_folder, footprint).
+    /// Mode-sensitive: only one tab's selection is "live" at a time.
+    /// Switching modes preserves all three selections independently.
+    type Filter = (Option<i32>, Option<i32>, Option<i32>, Option<i32>, Option<i32>);
+    let active_filter = move || -> Filter {
+        match pane_mode.get() {
+            LeftPaneMode::Categories => (selected_category.get(), None, None, None, None),
+            LeftPaneMode::Storage => match selected_storage.get() {
+                StorageSelection::None => (None, None, None, None, None),
+                StorageSelection::Folder(id) => (None, Some(id), None, None, None),
+                StorageSelection::Location(id) => (None, None, Some(id), None, None),
+            },
+            LeftPaneMode::Footprints => match selected_footprint.get() {
+                FootprintSelection::None => (None, None, None, None, None),
+                FootprintSelection::Folder(id) => (None, None, None, Some(id), None),
+                FootprintSelection::Footprint(id) => (None, None, None, None, Some(id)),
+            },
+            // Lookups + Projects modes hide the parts grid entirely; no
+            // filter applies. The Show in main.rs gates the grid render.
+            LeftPaneMode::Lookups | LeftPaneMode::Projects => (None, None, None, None, None),
+        }
+    };
+
+    // Reset pagination when filter, search, sort, predicates, or
+    // meta-filter changes.
+    Effect::new(move |prev: Option<(Filter, String, (String, bool), usize, MetaFilter)>| {
+        // Predicate count is good enough as a change-detector for the
+        // pagination-reset; the actual fetch dependency tracks the full
+        // predicate state via `predicates.with`.
+        let cur = (
+            active_filter(),
+            search.get(),
+            sort.get(),
+            predicates.with(|v| v.len()),
+            meta_filter.get(),
+        );
         if let Some(p) = prev.as_ref() {
             if *p != cur {
                 offset.set(0);
@@ -31,7 +71,7 @@ pub fn PartsGrid() -> impl IntoView {
     });
 
     let parts = LocalResource::new(move || {
-        let cat = selected_category.get();
+        let (cat, storage_folder, storage_location, footprint_folder, footprint) = active_filter();
         let s = search.get();
         let off = offset.get();
         let (sort_col, sort_asc) = sort.get();
@@ -42,7 +82,37 @@ pub fn PartsGrid() -> impl IntoView {
         } else {
             None
         };
-        async move { api::fetch_parts(cat, s, PAGE_SIZE, off, sort_opt, dir_opt).await }
+        // Slice 11: when any predicate has a name set, use the
+        // parametric endpoint; otherwise the cheaper GET. Predicates
+        // with empty names are mid-edit rows that shouldn't filter yet.
+        let preds: Vec<api::Predicate> = predicates.with(|v| {
+            v.iter().filter(|p| !p.name.is_empty()).cloned().collect()
+        });
+        let meta_only = meta_filter.get().to_meta_only();
+        async move {
+            if preds.is_empty() {
+                api::fetch_parts(
+                    cat, storage_folder, storage_location, footprint_folder, footprint,
+                    s, PAGE_SIZE, off, sort_opt, dir_opt, meta_only,
+                ).await
+            } else {
+                let body = api::ParametricBody {
+                    predicates: preds,
+                    category: cat,
+                    storage_folder,
+                    storage_location,
+                    footprint_folder,
+                    footprint,
+                    search: if s.is_empty() { None } else { Some(s) },
+                    meta_only,
+                    limit: PAGE_SIZE,
+                    offset: off,
+                    sort: sort_opt,
+                    dir: dir_opt,
+                };
+                api::post_parametric(body).await
+            }
+        }
     });
 
     let total = move || parts.get()
@@ -59,13 +129,51 @@ pub fn PartsGrid() -> impl IntoView {
     };
 
     // Active-filter banner: tree gives us the path for the selected
-    // category; render a "Filtering by category: …" with a clear button.
+    // category; render a "Filtering by …" with a clear button. One
+    // resource per tree-shape, looked up only when the matching mode
+    // is active.
     let tree_resource = LocalResource::new(api::fetch_category_tree);
+    let storage_tree_resource = LocalResource::new(api::fetch_storage_tree);
+    let footprint_tree_resource = LocalResource::new(api::fetch_footprint_tree);
+
     let active_category_path = move || -> Option<String> {
+        if pane_mode.get() != LeftPaneMode::Categories { return None; }
         let cat = selected_category.get()?;
         let r = tree_resource.get()?;
         match &*r {
             Ok(roots) => find_category_path(roots, cat),
+            Err(_) => None,
+        }
+    };
+    let active_storage_label = move || -> Option<(&'static str, String)> {
+        if pane_mode.get() != LeftPaneMode::Storage { return None; }
+        let sel = selected_storage.get();
+        if sel == StorageSelection::None { return None; }
+        let r = storage_tree_resource.get()?;
+        match &*r {
+            Ok(roots) => match sel {
+                StorageSelection::Folder(id) => find_storage_folder_path(roots, id)
+                    .map(|p| ("folder", p)),
+                StorageSelection::Location(id) => find_storage_location_path(roots, id)
+                    .map(|p| ("location", p)),
+                StorageSelection::None => None,
+            },
+            Err(_) => None,
+        }
+    };
+    let active_footprint_label = move || -> Option<(&'static str, String)> {
+        if pane_mode.get() != LeftPaneMode::Footprints { return None; }
+        let sel = selected_footprint.get();
+        if sel == FootprintSelection::None { return None; }
+        let r = footprint_tree_resource.get()?;
+        match &*r {
+            Ok(roots) => match sel {
+                FootprintSelection::Folder(id) => find_footprint_folder_path(roots, id)
+                    .map(|p| ("folder", p)),
+                FootprintSelection::Footprint(id) => find_footprint_leaf_path(roots, id)
+                    .map(|p| ("footprint", p)),
+                FootprintSelection::None => None,
+            },
             Err(_) => None,
         }
     };
@@ -90,6 +198,17 @@ pub fn PartsGrid() -> impl IntoView {
                     <button class="clear-btn" title="Clear search"
                         on:click=move |_| search.set(String::new())>"✕"</button>
                 </Show>
+            </div>
+            <div class="meta-filter" title="Filter by part type">
+                <button class="meta-filter-btn"
+                    class:active=move || meta_filter.get() == MetaFilter::All
+                    on:click=move |_| meta_filter.set(MetaFilter::All)>"All"</button>
+                <button class="meta-filter-btn"
+                    class:active=move || meta_filter.get() == MetaFilter::RealOnly
+                    on:click=move |_| meta_filter.set(MetaFilter::RealOnly)>"Real"</button>
+                <button class="meta-filter-btn"
+                    class:active=move || meta_filter.get() == MetaFilter::MetaOnly
+                    on:click=move |_| meta_filter.set(MetaFilter::MetaOnly)>"Meta"</button>
             </div>
             <div class="spacer" />
             <span class="total">
@@ -126,6 +245,27 @@ pub fn PartsGrid() -> impl IntoView {
                     on:click=move |_| selected_category.set(None)>"clear"</button>
             </div>
         </Show>
+        <Show when=move || active_storage_label().is_some()>
+            <div class="active-filter">
+                {move || active_storage_label().map(|(kind, label)| view! {
+                    <span>{format!("Filtering by storage {kind}: ")}</span>
+                    <strong>{label}</strong>
+                })}
+                <button class="clear-filter"
+                    on:click=move |_| selected_storage.set(StorageSelection::None)>"clear"</button>
+            </div>
+        </Show>
+        <Show when=move || active_footprint_label().is_some()>
+            <div class="active-filter">
+                {move || active_footprint_label().map(|(kind, label)| view! {
+                    <span>{format!("Filtering by {kind}: ")}</span>
+                    <strong>{label}</strong>
+                })}
+                <button class="clear-filter"
+                    on:click=move |_| selected_footprint.set(FootprintSelection::None)>"clear"</button>
+            </div>
+        </Show>
+        <ParametricFilter/>
         <div class="parts-grid">
             <Suspense fallback=|| view! { <p class="muted" style="padding:12px">"Loading…"</p> }>
                 {move || parts.get().map(|res| match &*res {
@@ -151,14 +291,9 @@ fn GroupedParts(items: Vec<PartRow>) -> impl IntoView {
     }
 
     view! {
-        <For each={
-            let g = groups.clone();
-            move || g.clone()
-        }
-            key=|(path, _)| path.clone()
-            let:group>
-            <CategorySection path=group.0 items=group.1 />
-        </For>
+        {groups.into_iter().map(|(path, items)| view! {
+            <CategorySection path=path items=items/>
+        }).collect::<Vec<_>>()}
     }
 }
 
@@ -172,7 +307,7 @@ fn CategorySection(path: String, items: Vec<PartRow>) -> impl IntoView {
         </div>
         <table class="parts">
             <thead><tr>
-                <SortableTh label="#" col="id" width="60px" />
+                <SortableTh label="#" col="id" width="60px" align_right=true />
                 <SortableTh label="Name" col="name" width="" />
                 <SortableTh label="Description" col="description" width="" />
                 <SortableTh label="Stock" col="stock_level" width="60px" align_right=true />
@@ -182,12 +317,7 @@ fn CategorySection(path: String, items: Vec<PartRow>) -> impl IntoView {
                 <SortableTh label="Avg Price" col="average_price" width="80px" align_right=true />
             </tr></thead>
             <tbody>
-                <For each={
-                    let it = items.clone();
-                    move || it.clone()
-                } key=|p: &PartRow| p.id let:p>
-                    <PartRowView p=p />
-                </For>
+                {items.into_iter().map(|p| view! { <PartRowView p=p/> }).collect::<Vec<_>>()}
             </tbody>
         </table>
     }
@@ -260,17 +390,118 @@ fn walk(node: &CategoryNode, id: i32) -> Option<String> {
     None
 }
 
+fn find_storage_folder_path(roots: &[StorageTreeNode], id: i32) -> Option<String> {
+    for r in roots {
+        if let Some(p) = walk_storage_folder(r, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn walk_storage_folder(node: &StorageTreeNode, id: i32) -> Option<String> {
+    if node.id == id {
+        return Some(node.category_path.clone());
+    }
+    for child in &node.children {
+        if let Some(p) = walk_storage_folder(child, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn find_storage_location_path(roots: &[StorageTreeNode], id: i32) -> Option<String> {
+    for r in roots {
+        if let Some(p) = walk_storage_location(r, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn walk_storage_location(node: &StorageTreeNode, id: i32) -> Option<String> {
+    for loc in &node.locations {
+        if loc.id == id {
+            return Some(format!("{} ➤ {}", node.category_path, loc.name));
+        }
+    }
+    for child in &node.children {
+        if let Some(p) = walk_storage_location(child, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn find_footprint_folder_path(roots: &[FootprintTreeNode], id: i32) -> Option<String> {
+    for r in roots {
+        if let Some(p) = walk_footprint_folder(r, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn walk_footprint_folder(node: &FootprintTreeNode, id: i32) -> Option<String> {
+    if node.id == id {
+        return Some(node.category_path.clone());
+    }
+    for child in &node.children {
+        if let Some(p) = walk_footprint_folder(child, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn find_footprint_leaf_path(roots: &[FootprintTreeNode], id: i32) -> Option<String> {
+    for r in roots {
+        if let Some(p) = walk_footprint_leaf(r, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn walk_footprint_leaf(node: &FootprintTreeNode, id: i32) -> Option<String> {
+    for fp in &node.footprints {
+        if fp.id == id {
+            return Some(format!("{} ➤ {}", node.category_path, fp.name));
+        }
+    }
+    for child in &node.children {
+        if let Some(p) = walk_footprint_leaf(child, id) {
+            return Some(p);
+        }
+    }
+    None
+}
+
 #[component]
 fn PartRowView(p: PartRow) -> impl IntoView {
     let selected_part = expect_context::<SelectedPart>().0;
     let id = p.id;
     let stock_class = if p.low_stock { "right low-stock" } else { "right" };
+    let is_meta = p.meta_part;
+    let row_class = if is_meta { "part-row meta-part-row" } else { "part-row" };
+    let name_view = if is_meta {
+        view! {
+            <td class="meta-part-name">
+                <span>{p.name}</span>
+                <span class="meta-tag" title="Meta-part: matches any real part satisfying its criteria">"(meta)"</span>
+            </td>
+        }.into_any()
+    } else {
+        view! { <td>{p.name}</td> }.into_any()
+    };
 
     view! {
-        <tr class:selected=move || selected_part.get() == Some(id)
+        <tr class=row_class
+            class:selected=move || selected_part.get() == Some(id)
             on:click=move |_| selected_part.set(Some(id))>
-            <td>{p.id}</td>
-            <td>{p.name}</td>
+            <td class="right">{p.id}</td>
+            {name_view}
             <td>{p.description.unwrap_or_default()}</td>
             <td class=stock_class>{p.stock_level}</td>
             <td class="right muted">{p.min_stock_level}</td>

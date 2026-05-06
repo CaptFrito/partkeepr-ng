@@ -9,7 +9,7 @@ use leptos::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::api::{self, LookupOption, SiPrefixOption, UnitOption};
-use crate::types::PartDetail;
+use crate::types::{ParameterNameRow, PartDetail};
 use crate::{
     DataVersion, EditorMode, EditorModeState, MetaPartHelpState,
     ParamTypeHelpState, SelectedPart,
@@ -144,8 +144,22 @@ struct EditableParam {
     max_si_prefix_id: String,
 }
 
+/// Slice 11c: editable criterion row. Mirrors `Predicate`'s field set
+/// but in the form-string flavour (parsed to typed values on save).
+#[derive(Clone, Debug)]
+struct EditableCriterion {
+    key: u32,
+    name: String,
+    op: String,
+    value_type: String, // "string" | "numeric"
+    string_value: String,
+    value: String,
+    si_prefix_id: String,
+    unit_id: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum EditTab { Basic, Manufacturers, Distributors, Parameters }
+enum EditTab { Basic, Manufacturers, Distributors, Parameters, Criteria }
 
 // ---------------------------------------------------------------------------
 //  Main editor form
@@ -250,6 +264,19 @@ fn EditorForm(
             max_si_prefix_id: opt_id_str(p.max_si_prefix_id),
         }).collect()).unwrap_or_default(),
     );
+    let crit_rows: RwSignal<Vec<EditableCriterion>> = RwSignal::new(
+        s.map(|d| d.criteria.iter().map(|c| EditableCriterion {
+            key: next_key(),
+            name: c.name.clone(),
+            op: c.op.clone(),
+            value_type: c.value_type.clone(),
+            string_value: c.string_value.clone(),
+            value: c.value.map(|v| v.to_string()).unwrap_or_default(),
+            si_prefix_id: opt_id_str(c.si_prefix_id),
+            unit_id: opt_id_str(c.unit_id),
+        }).collect()).unwrap_or_default(),
+    );
+    let is_meta_part = initial_meta || s.map(|d| d.meta_part).unwrap_or(false);
 
     let active_tab = RwSignal::new(EditTab::Basic);
     let submitting = RwSignal::new(false);
@@ -339,6 +366,31 @@ fn EditorForm(
             return;
         }
 
+        // Criteria — same skip-empty semantics as parameters (skip rows
+        // missing a name or a complete value). Only meaningful for meta-
+        // parts; for non-meta parts we pass an empty array (which clears
+        // any stale criteria from a part that's been toggled off).
+        let mut crits: Vec<api::MetaPartCriterionWrite> = Vec::new();
+        for r in crit_rows.get_untracked().iter() {
+            if r.name.trim().is_empty() { continue; }
+            if r.value_type != "string" && r.value_type != "numeric" { continue; }
+            if !matches!(r.op.as_str(), "=" | "!=" | "<" | "<=" | ">" | ">=" | "like" | "in") {
+                continue;
+            }
+            let is_string = r.value_type == "string";
+            crits.push(api::MetaPartCriterionWrite {
+                name: r.name.trim().to_string(),
+                op: r.op.clone(),
+                value_type: r.value_type.clone(),
+                string_value: if is_string {
+                    Some(r.string_value.clone())
+                } else { None },
+                value: if is_string { None } else { r.value.trim().parse::<f64>().ok() },
+                si_prefix_id: parse_id(&r.si_prefix_id),
+                unit_id: parse_id(&r.unit_id),
+            });
+        }
+
         let body = api::PartWrite {
             name: trimmed_name,
             description: empty_to_none(description.get()),
@@ -353,10 +405,11 @@ fn EditorForm(
             production_remarks: empty_to_none(production_remarks.get()),
             needs_review: needs_review.get(),
             min_stock_level: min_stock,
-            meta_part: initial_meta,
+            meta_part: is_meta_part,
             manufacturers: Some(mfgs),
             distributors: Some(dists),
             parameters: Some(params),
+            criteria: Some(crits),
         };
         submitting.set(true);
         error.set(None);
@@ -386,7 +439,13 @@ fn EditorForm(
     };
 
     let header_text = match (mode, seed.as_ref()) {
-        (EditorMode::Editing(_), Some(d)) => format!("Editing: {}", d.name),
+        (EditorMode::Editing(_), Some(d)) => {
+            if d.meta_part {
+                format!("Editing meta-part: {}", d.name)
+            } else {
+                format!("Editing: {}", d.name)
+            }
+        }
         (EditorMode::DuplicatingFrom(_), Some(d)) => format!("Duplicate of: {}", d.name),
         (EditorMode::Creating, _) => "New Part".to_string(),
         (EditorMode::CreatingMeta, _) => "New Meta-Part".to_string(),
@@ -395,8 +454,7 @@ fn EditorForm(
     let mfg_count = move || mfg_rows.get().len();
     let dist_count = move || dist_rows.get().len();
     let param_count = move || param_rows.get().len();
-
-    let is_creating_meta = initial_meta;
+    let crit_count = move || crit_rows.get().len();
 
     view! {
         <div class="head">
@@ -410,41 +468,54 @@ fn EditorForm(
                 <button class="btn-action"
                     prop:disabled={move || submitting.get()}
                     on:click=move |_| cancel()>"Cancel"</button>
-                <Show when=move || is_creating_meta>
-                    <div style="flex:1" />
-                    <button class="btn-action btn-recon"
-                        title="What is a meta-part?"
-                        on:click=move |_| meta_help.set(true)>
-                        "ⓘ Explain meta-parts"
-                    </button>
-                </Show>
+                // Explain-meta-parts is now surfaced inside the Basic-tab
+                // banner (visible whenever is_meta_part is true, which
+                // covers both Create and Edit). The toolbar copy was
+                // create-only and redundant once the banner exists.
             </div>
             <Show when={move || error.get().is_some()}>
                 <div class="modal-error" style="margin-top:8px">{move || error.get().unwrap_or_default()}</div>
             </Show>
         </div>
 
+        // Tab strip layout differs for meta-parts: Criteria is THE
+        // primary thing, so it sits right after Basic; Parameters is
+        // hidden entirely (a meta-part has criteria, not parameters);
+        // Manufacturers/Distributors stay accessible at the end but
+        // are de-emphasized — usually empty for meta-parts since any
+        // mfr/dist of a matching real part is implied.
         <div class="tabs">
             <button class:active={move || active_tab.get() == EditTab::Basic}
                 on:click=move |_| active_tab.set(EditTab::Basic)>"Basic"</button>
+            <Show when=move || is_meta_part>
+                <button class:active={move || active_tab.get() == EditTab::Criteria}
+                    on:click=move |_| active_tab.set(EditTab::Criteria)>
+                    "Criteria (" {crit_count} ")"
+                </button>
+            </Show>
             <button class:active={move || active_tab.get() == EditTab::Manufacturers}
+                class:tab-deemph=move || is_meta_part
                 on:click=move |_| active_tab.set(EditTab::Manufacturers)>
                 "Manufacturers (" {mfg_count} ")"
             </button>
             <button class:active={move || active_tab.get() == EditTab::Distributors}
+                class:tab-deemph=move || is_meta_part
                 on:click=move |_| active_tab.set(EditTab::Distributors)>
                 "Distributors (" {dist_count} ")"
             </button>
-            <button class:active={move || active_tab.get() == EditTab::Parameters}
-                on:click=move |_| active_tab.set(EditTab::Parameters)>
-                "Parameters (" {param_count} ")"
-            </button>
+            <Show when=move || !is_meta_part>
+                <button class:active={move || active_tab.get() == EditTab::Parameters}
+                    on:click=move |_| active_tab.set(EditTab::Parameters)>
+                    "Parameters (" {param_count} ")"
+                </button>
+            </Show>
         </div>
 
         // All tabs always rendered, toggled via display:none. Preserves
         // input focus and signal subscriptions across tab switches.
         <div class="tab-body" style:display={move || tab_display(active_tab.get(), EditTab::Basic)}>
             <BasicTab
+                is_meta_part=is_meta_part
                 name=name description=description comment=comment internal_pn=internal_pn
                 status=status condition=condition production_remarks=production_remarks
                 min_stock_level=min_stock_level needs_review=needs_review
@@ -452,6 +523,7 @@ fn EditorForm(
                 part_unit_id=part_unit_id
                 categories=categories storage_locs=storage_locs footprints=footprints
                 part_units=part_units
+                meta_help=meta_help
             />
         </div>
         <div class="tab-body" style:display={move || tab_display(active_tab.get(), EditTab::Manufacturers)}>
@@ -461,8 +533,13 @@ fn EditorForm(
             <DistributorsTab rows=dist_rows distributors=distributors />
         </div>
         <div class="tab-body" style:display={move || tab_display(active_tab.get(), EditTab::Parameters)}>
-            <ParametersTab rows=param_rows units=units si_prefixes=si_prefixes />
+            <ParametersTab rows=param_rows units=units si_prefixes=si_prefixes.clone() />
         </div>
+        <Show when=move || is_meta_part>
+            <div class="tab-body" style:display={move || tab_display(active_tab.get(), EditTab::Criteria)}>
+                <CriteriaTab rows=crit_rows si_prefixes=si_prefixes.clone()/>
+            </div>
+        </Show>
     }
 }
 
@@ -476,6 +553,7 @@ fn tab_display(active: EditTab, this: EditTab) -> &'static str {
 
 #[component]
 fn BasicTab(
+    is_meta_part: bool,
     name: RwSignal<String>,
     description: RwSignal<String>,
     comment: RwSignal<String>,
@@ -493,9 +571,69 @@ fn BasicTab(
     storage_locs: Vec<LookupOption>,
     footprints: Vec<LookupOption>,
     part_units: Vec<LookupOption>,
+    meta_help: RwSignal<bool>,
 ) -> impl IntoView {
+    let name_label = if is_meta_part {
+        "Meta-Part Name (required)"
+    } else {
+        "Name (required)"
+    };
+    // Build the real-part-only section once, eagerly. We can't put it
+    // inside a `<Show>` because Show requires Fn children but the
+    // moved `storage_locs` Vec makes the children FnOnce.
+    let real_part_section: leptos::prelude::AnyView = if is_meta_part {
+        ().into_any()
+    } else {
+        view! {
+            <FormField label="Local Part Number"
+                hint="Your own SKU or tracking number for cross-referencing. Optional.">
+                <input type="text" prop:value={move || internal_pn.get()}
+                    on:input={move |ev| internal_pn.set(event_target_value(&ev))} />
+            </FormField>
+            <FormField label="Min stock level" hint="">
+                <input type="number" min="0" step="1" prop:value={move || min_stock_level.get()}
+                    on:input={move |ev| min_stock_level.set(event_target_value(&ev))} />
+            </FormField>
+            <FormField label="Status" hint="">
+                <input type="text" prop:value={move || status.get()}
+                    on:input={move |ev| status.set(event_target_value(&ev))} />
+            </FormField>
+            <FormField label="Condition" hint="">
+                <input type="text" prop:value={move || condition.get()}
+                    on:input={move |ev| condition.set(event_target_value(&ev))} />
+            </FormField>
+            <FormField label="Storage location" hint="">
+                <LookupSelect signal=storage_id options=storage_locs />
+            </FormField>
+            <FormField label="Production remarks" hint="">
+                <input type="text" prop:value={move || production_remarks.get()}
+                    on:input={move |ev| production_remarks.set(event_target_value(&ev))} />
+            </FormField>
+            <label class="field-inline" style="padding:6px 0">
+                <input type="checkbox"
+                    prop:checked={move || needs_review.get()}
+                    on:change={move |ev| needs_review.set(event_target_checked(&ev))} />
+                <span>"Needs review"</span>
+            </label>
+        }.into_any()
+    };
     view! {
-        <FormField label="Name (required)" hint="">
+        <Show when=move || is_meta_part>
+            <div class="meta-part-banner">
+                <span class="meta-part-banner-icon">"ℹ"</span>
+                <span class="meta-part-banner-text">
+                    "A meta-part stands in for any real part whose parameters "
+                    "satisfy the criteria below. Use it in BOMs when the "
+                    "exact part is interchangeable."
+                </span>
+                <button class="btn-action btn-recon"
+                    title="Longer-form explanation"
+                    on:click=move |_| meta_help.set(true)>
+                    "Explain meta-parts"
+                </button>
+            </div>
+        </Show>
+        <FormField label=name_label hint="">
             <input type="text" prop:value={move || name.get()}
                 on:input={move |ev| name.set(event_target_value(&ev))} />
         </FormField>
@@ -503,28 +641,8 @@ fn BasicTab(
             <input type="text" prop:value={move || description.get()}
                 on:input={move |ev| description.set(event_target_value(&ev))} />
         </FormField>
-        <FormField label="Local Part Number"
-            hint="Your own SKU or tracking number for cross-referencing. Optional.">
-            <input type="text" prop:value={move || internal_pn.get()}
-                on:input={move |ev| internal_pn.set(event_target_value(&ev))} />
-        </FormField>
-        <FormField label="Min stock level" hint="">
-            <input type="number" min="0" step="1" prop:value={move || min_stock_level.get()}
-                on:input={move |ev| min_stock_level.set(event_target_value(&ev))} />
-        </FormField>
-        <FormField label="Status" hint="">
-            <input type="text" prop:value={move || status.get()}
-                on:input={move |ev| status.set(event_target_value(&ev))} />
-        </FormField>
-        <FormField label="Condition" hint="">
-            <input type="text" prop:value={move || condition.get()}
-                on:input={move |ev| condition.set(event_target_value(&ev))} />
-        </FormField>
         <FormField label="Category" hint="">
             <LookupSelect signal=category_id options=categories />
-        </FormField>
-        <FormField label="Storage location" hint="">
-            <LookupSelect signal=storage_id options=storage_locs />
         </FormField>
         <FormField label="Footprint" hint="">
             <LookupSelect signal=footprint_id options=footprints />
@@ -537,16 +655,11 @@ fn BasicTab(
                 on:input={move |ev| comment.set(event_target_value(&ev))}
                 prop:value={move || comment.get()}></textarea>
         </FormField>
-        <FormField label="Production remarks" hint="">
-            <input type="text" prop:value={move || production_remarks.get()}
-                on:input={move |ev| production_remarks.set(event_target_value(&ev))} />
-        </FormField>
-        <label class="field-inline" style="padding:6px 0">
-            <input type="checkbox"
-                prop:checked={move || needs_review.get()}
-                on:change={move |ev| needs_review.set(event_target_checked(&ev))} />
-            <span>"Needs review"</span>
-        </label>
+        // Real-part-only fields. Hidden for meta-parts because they
+        // describe a physical instance (stock, condition, status) or a
+        // catalog hand for a specific real part (local part number,
+        // production remarks). A meta-part is an abstract spec.
+        {real_part_section}
     }
 }
 
@@ -963,6 +1076,222 @@ fn ParamRow(
                     </div>
                 }.into_any()
             }}
+        </div>
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Criteria tab (slice 11c — meta-part parameter criteria)
+// ---------------------------------------------------------------------------
+
+#[component]
+fn CriteriaTab(
+    rows: RwSignal<Vec<EditableCriterion>>,
+    si_prefixes: Vec<SiPrefixOption>,
+) -> impl IntoView {
+    // Load the parameter-name vocabulary once. Each row uses it to
+    // populate its name dropdown so users pick from the actual set of
+    // names already in use, not free-text-typed names that won't match
+    // anything. (Same pattern as the slice-11b filter pane.)
+    let names = LocalResource::new(|| api::fetch_parameter_names());
+    let add = move |_| {
+        rows.update(|v| v.push(EditableCriterion {
+            key: next_key(),
+            name: String::new(),
+            op: "=".to_string(),
+            value_type: "numeric".to_string(),
+            string_value: String::new(),
+            value: String::new(),
+            si_prefix_id: String::new(),
+            unit_id: String::new(),
+        }));
+    };
+    view! {
+        <p class="modal-help">
+            "Criteria define which real parts this meta-part stands in for. "
+            "Each row is a predicate against a parameter name; matches are "
+            "the parts whose own parameters satisfy "<em>"all"</em>" criteria."
+        </p>
+        <Suspense fallback=|| view! {
+            <p class="muted" style:padding="6px 0">"Loading parameter names…"</p>
+        }>
+            {move || names.get().map(|res| match &*res {
+                Err(e) => view! {
+                    <p class="muted">{format!("Error: {}", e.0)}</p>
+                }.into_any(),
+                Ok(name_rows) => {
+                    let names_v = name_rows.clone();
+                    let prefixes_v = si_prefixes.clone();
+                    view! {
+                        <For each=move || rows.get()
+                            key=|r| r.key
+                            let:row>
+                            <CriterionRow row=row rows=rows
+                                names=names_v.clone()
+                                si_prefixes=prefixes_v.clone()/>
+                        </For>
+                    }.into_any()
+                }
+            })}
+        </Suspense>
+        <button class="btn-action btn-add" style="margin-top:8px" on:click=add>
+            "+ Add criterion"
+        </button>
+    }
+}
+
+#[component]
+fn CriterionRow(
+    row: EditableCriterion,
+    rows: RwSignal<Vec<EditableCriterion>>,
+    names: Vec<ParameterNameRow>,
+    si_prefixes: Vec<SiPrefixOption>,
+) -> impl IntoView {
+    let key = row.key;
+    let is_string = row.value_type == "string";
+
+    // Picking a parameter name updates both the name and value_type
+    // (encoded in the option's value as "name|value_type" so the same
+    // name appearing as both string- and numeric-typed shows up twice
+    // distinguishably). Reset value-shaped fields and downgrade `like`
+    // → `=` when the new type can't support it.
+    let on_name = move |ev: leptos::ev::Event| {
+        let raw = event_target_value(&ev);
+        let (name, vtype) = match raw.split_once('|') {
+            Some((n, t)) => (n.to_string(), t.to_string()),
+            None => (raw, String::new()),
+        };
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) {
+            r.name = name;
+            if !vtype.is_empty() {
+                r.value_type = vtype.clone();
+            }
+            r.value = String::new();
+            r.string_value = String::new();
+            r.si_prefix_id = String::new();
+            if vtype == "numeric" && r.op == "like" {
+                r.op = "=".to_string();
+            }
+        });
+    };
+    let on_type = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) {
+            r.value_type = v.clone();
+            // Clear value-shaped fields so an old numeric value doesn't
+            // bleed into a string predicate (and vice versa). Reset op
+            // to "=" if switching from string→numeric while op is "like".
+            r.value = String::new();
+            r.string_value = String::new();
+            r.si_prefix_id = String::new();
+            if v == "numeric" && r.op == "like" {
+                r.op = "=".to_string();
+            }
+        });
+    };
+    let on_op = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) { r.op = v; });
+    };
+    let on_string_value = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) { r.string_value = v; });
+    };
+    let on_numeric_value = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) { r.value = v; });
+    };
+    let on_prefix = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        rows.update(|rs| if let Some(r) = rs.iter_mut().find(|r| r.key == key) { r.si_prefix_id = v; });
+    };
+
+    let prefix_options = si_prefixes.clone();
+    // Sort names alphabetically (case-insensitive) for the dropdown.
+    let name_options: Vec<ParameterNameRow> = {
+        let mut sorted = names.clone();
+        sorted.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        sorted
+    };
+    // Selected option value: "name|value_type". Matches the encoding
+    // we write in the options below so prop:value reliably maps back.
+    let row_name_for_select = row.name.clone();
+    let row_vtype_for_select = row.value_type.clone();
+    let selected_value = if row_name_for_select.is_empty() {
+        String::new()
+    } else {
+        format!("{row_name_for_select}|{row_vtype_for_select}")
+    };
+
+    view! {
+        <div class="criterion-row">
+            <select class="predicate-name"
+                prop:value=selected_value
+                on:change=on_name>
+                <option value="">"— pick parameter —"</option>
+                {name_options.iter().map(|n| {
+                    let value = format!("{}|{}", n.name, n.value_type);
+                    let unit = n.dom_unit_symbol.clone().unwrap_or_default();
+                    let suffix = if unit.is_empty() {
+                        format!(" — {}", n.value_type)
+                    } else {
+                        format!(" — {} ({})", n.value_type, unit)
+                    };
+                    let label = format!("{}{}", n.name, suffix);
+                    view! { <option value=value>{label}</option> }
+                }).collect::<Vec<_>>()}
+            </select>
+            <select class="predicate-op"
+                prop:value=row.op.clone() on:change=on_op>
+                <option value="=">"= equals"</option>
+                <option value="!=">"≠ not equals"</option>
+                <option value="<">"< less than"</option>
+                <option value="<=">"≤ less than or equal"</option>
+                <option value=">">"> greater than"</option>
+                <option value=">=">"≥ greater than or equal"</option>
+                {if is_string {
+                    view! { <option value="like">"% matches (wildcard)"</option> }.into_any()
+                } else { ().into_any() }}
+                <option value="in">"∈ in list"</option>
+            </select>
+            <select class="predicate-prefix"
+                prop:value=row.value_type.clone()
+                on:change=on_type
+                style="width:110px">
+                <option value="numeric">"numeric"</option>
+                <option value="string">"string"</option>
+            </select>
+            {if is_string {
+                view! {
+                    <span class="predicate-value-cell">
+                        <input type="text" class="predicate-value-string"
+                            placeholder="value (use % for 'like')"
+                            prop:value=row.string_value.clone()
+                            on:input=on_string_value/>
+                    </span>
+                }.into_any()
+            } else {
+                view! {
+                    <span class="predicate-value-cell">
+                        <input type="text" class="predicate-value"
+                            placeholder="value"
+                            prop:value=row.value.clone()
+                            on:input=on_numeric_value/>
+                        <select class="predicate-prefix"
+                            prop:value=row.si_prefix_id.clone()
+                            on:change=on_prefix>
+                            <option value="">"(no prefix)"</option>
+                            {prefix_options.into_iter().map(|p| view! {
+                                <option value=p.id.to_string()>
+                                    {format!("{} ×{}{}", p.symbol, p.base, fmt_exp(p.exponent))}
+                                </option>
+                            }).collect::<Vec<_>>()}
+                        </select>
+                    </span>
+                }.into_any()
+            }}
+            <button class="row-remove" title="Remove criterion"
+                on:click=move |_| rows.update(|v| v.retain(|r| r.key != key))>"✕"</button>
         </div>
     }
 }

@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use axum::{http::Method, routing::get, Router};
+use axum::{extract::FromRef, http::Method, routing::get, Router};
 use sqlx::mysql::MySqlPoolOptions;
+use sqlx::MySqlPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -10,6 +11,25 @@ use tracing_subscriber::EnvFilter;
 mod error;
 mod handlers;
 mod models;
+
+use handlers::storage::StorageConfig;
+
+/// Combined router state. axum's `FromRef` impls below let individual
+/// handlers extract just the part they need (e.g.
+/// `State(pool): State<MySqlPool>`) without the rest of the app having
+/// to know about `StorageConfig`.
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: MySqlPool,
+    pub store: StorageConfig,
+}
+
+impl FromRef<AppState> for MySqlPool {
+    fn from_ref(s: &AppState) -> Self { s.pool.clone() }
+}
+impl FromRef<AppState> for StorageConfig {
+    fn from_ref(s: &AppState) -> Self { s.store.clone() }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,12 +56,15 @@ async fn main() -> anyhow::Result<()> {
         .context("connecting to database")?;
     tracing::info!("connected to database");
 
+    let store = StorageConfig::from_env_and_init().await?;
+    let state = AppState { pool, store };
+
     // Permissive CORS for local dev — frontend runs on :8081 (Trunk) while
     // the API is on :8080. Tighten / restrict to specific origins when we
     // leave localhost.
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::PATCH])
         .allow_headers(Any);
 
     let app = Router::new()
@@ -50,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(models::routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(pool);
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     tracing::info!(%bind_addr, "listening");

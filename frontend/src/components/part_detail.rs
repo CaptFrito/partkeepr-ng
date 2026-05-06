@@ -2,13 +2,15 @@ use leptos::prelude::*;
 
 use crate::api;
 use crate::types::{
-    PartAttachmentView, PartDetail, PartDistributorView, PartManufacturerView,
-    PartParameterView, StockEntryView,
+    MetaPartCriterionView, PartAttachmentView, PartDetail, PartDistributorView,
+    PartManufacturerView, PartParameterView, PartProjectRef, PartRunRef, PartRow,
+    StockEntryView,
 };
-use crate::components::PartEditorPanel;
+use crate::components::{AttachmentsSection, PartEditorPanel};
 use crate::{
-    DataVersion, DeletePartCtx, DeletePartState, EditorMode, EditorModeState,
-    SelectedPart, StockDialogCtx, StockDialogMode, StockDialogState,
+    DataVersion, DeletePartCtx, DeletePartState, EditorMode, EditorModeState, LeftPaneMode,
+    LeftPaneModeState, SelectedPart, SelectedProject, StockDialogCtx, StockDialogMode,
+    StockDialogState,
 };
 
 #[component]
@@ -190,7 +192,8 @@ fn DetailsTab(detail: PartDetail) -> impl IntoView {
     let mfg_title = format!("Manufacturers ({})", mfgs.len());
     let dist_title = format!("Distributors ({})", dists.len());
     let param_title = format!("Parameters ({})", params.len());
-    let attach_title = format!("Attachments ({})", attaches.len());
+    // (Attachments title is built inside AttachmentsSection from the
+    // length of `attaches` — it owns the live count display.)
 
     // Eagerly-built row views. Each section is rendered once when this
     // function runs — it's not reactive, so we can produce a Vec<AnyView>
@@ -229,17 +232,11 @@ fn DetailsTab(detail: PartDetail) -> impl IntoView {
         }.into_any()
     }).collect();
 
-    let attaches_empty = attaches.is_empty();
-    let attach_rows: Vec<_> = attaches.into_iter().map(|a| {
-        let display_name = a.original_filename.unwrap_or_else(|| a.filename.clone());
-        view! {
-            <tr>
-                <td>{display_name}</td>
-                <td class="muted">{a.mimetype}</td>
-                <td class="right muted">{format_bytes(a.size)}</td>
-            </tr>
-        }.into_any()
-    }).collect();
+    // Attachments are rendered live by AttachmentsSection below — it
+    // owns the upload control + delete buttons. Keep the existing
+    // `attaches` Vec as the source of truth (came from the part-detail
+    // fetch) and pass it in.
+    let upload_path = format!("/api/parts/{id}/attachments");
 
     view! {
         <dl class="kv">
@@ -289,15 +286,281 @@ fn DetailsTab(detail: PartDetail) -> impl IntoView {
             </CollapsibleSection>
         })}
 
-        {(!attaches_empty).then(|| view! {
-            <CollapsibleSection title=attach_title>
-                <table class="sub">
-                    <thead><tr><th>"Filename"</th><th>"MIME"</th><th class="right">"Size"</th></tr></thead>
-                    <tbody>{attach_rows}</tbody>
-                </table>
-            </CollapsibleSection>
-        })}
+        <AttachmentsSection kind="PartAttachment" upload_path=upload_path attachments=attaches/>
+        <PartProjectsSection part_id=id/>
+        <PartRunsSection part_id=id/>
+        <Show when=move || detail.meta_part>
+            <CriteriaSection criteria=detail.criteria.clone()/>
+            <MatchesSection part_id=id/>
+        </Show>
     }
+}
+
+#[component]
+fn CriteriaSection(criteria: Vec<MetaPartCriterionView>) -> impl IntoView {
+    let count = criteria.len();
+    let title = format!("Criteria ({count})");
+    if count == 0 {
+        return view! {
+            <CollapsibleSection title=title>
+                <p class="muted" style:padding="6px 0">
+                    "No criteria yet. Edit this meta-part and add criteria on the Criteria tab."
+                </p>
+            </CollapsibleSection>
+        }.into_any();
+    }
+    let rows: Vec<_> = criteria.into_iter().map(|c| {
+        let value = format_criterion_value(&c);
+        view! {
+            <tr>
+                <td>{c.name}</td>
+                <td class="right tabular-nums">{c.op}</td>
+                <td>{value}</td>
+            </tr>
+        }
+    }).collect();
+    view! {
+        <CollapsibleSection title=title>
+            <table class="sub">
+                <thead><tr>
+                    <th>"Parameter"</th>
+                    <th class="right">"Op"</th>
+                    <th>"Value"</th>
+                </tr></thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </CollapsibleSection>
+    }.into_any()
+}
+
+fn format_criterion_value(c: &MetaPartCriterionView) -> String {
+    if c.value_type == "string" {
+        if c.string_value.is_empty() { "—".into() } else { c.string_value.clone() }
+    } else {
+        let v = c.value.map(|n| n.to_string()).unwrap_or_else(|| "—".into());
+        let prefix = c.si_prefix_symbol.clone().unwrap_or_default();
+        let unit = c.unit_symbol.clone().unwrap_or_default();
+        match (prefix.is_empty(), unit.is_empty()) {
+            (true,  true)  => v,
+            (false, true)  => format!("{v} {prefix}"),
+            (true,  false) => format!("{v} {unit}"),
+            (false, false) => format!("{v} {prefix}{unit}"),
+        }
+    }
+}
+
+#[component]
+fn MatchesSection(part_id: i32) -> impl IntoView {
+    let data_version = expect_context::<DataVersion>().0;
+    let resource = LocalResource::new(move || {
+        let _ = data_version.get();
+        async move { api::fetch_part_matches(part_id, 50, 0).await }
+    });
+    view! {
+        <Suspense fallback=|| view! {
+            <p class="muted" style:padding="6px 0">"Computing matches…"</p>
+        }>
+            {move || resource.get().map(|res| match &*res {
+                Err(e) => view! {
+                    <p class="muted" style:padding="6px 0">{format!("Error: {}", e.0)}</p>
+                }.into_any(),
+                Ok(resp) => {
+                    let total = resp.total;
+                    let items = resp.items.clone();
+                    let title = format!("Matching parts ({total})");
+                    if total == 0 {
+                        return view! {
+                            <CollapsibleSection title=title>
+                                <p class="muted" style:padding="6px 0">
+                                    "No real parts currently match this meta-part's criteria."
+                                </p>
+                            </CollapsibleSection>
+                        }.into_any();
+                    }
+                    let shown = items.len();
+                    view! {
+                        <CollapsibleSection title=title>
+                            <p class="muted" style:padding="2px 0">{
+                                if (shown as i64) < total {
+                                    format!("Showing first {shown}.")
+                                } else { String::new() }
+                            }</p>
+                            <table class="sub">
+                                <thead><tr>
+                                    <th>"Name"</th>
+                                    <th>"Description"</th>
+                                    <th class="right">"Stock"</th>
+                                </tr></thead>
+                                <tbody>{
+                                    items.into_iter().map(|r| view! { <MatchRow r=r/> }).collect::<Vec<_>>()
+                                }</tbody>
+                            </table>
+                        </CollapsibleSection>
+                    }.into_any()
+                }
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn MatchRow(r: PartRow) -> impl IntoView {
+    let selected_part = expect_context::<SelectedPart>().0;
+    let id = r.id;
+    let name = r.name.clone();
+    let description = r.description.clone().unwrap_or_default();
+    let stock = r.stock_level;
+    view! {
+        <tr class="match-row" on:click=move |_| selected_part.set(Some(id))>
+            <td><a class="project-link" href="javascript:void(0)">{name}</a></td>
+            <td class="muted">{description}</td>
+            <td class="right">{stock}</td>
+        </tr>
+    }
+}
+
+#[component]
+fn PartProjectsSection(part_id: i32) -> impl IntoView {
+    let data_version = expect_context::<DataVersion>().0;
+    let resource = LocalResource::new(move || {
+        let _ = data_version.get();
+        api::fetch_part_projects(part_id)
+    });
+    view! {
+        <Suspense fallback=|| ()>
+            {move || resource.get().map(|res| match &*res {
+                Err(_) => ().into_any(),
+                Ok(rows) if rows.is_empty() => ().into_any(),
+                Ok(rows) => {
+                    let title = format!("Used in projects ({})", rows.len());
+                    let items = rows.clone();
+                    view! {
+                        <CollapsibleSection title=title>
+                            <table class="sub">
+                                <thead><tr>
+                                    <th>"Project"</th>
+                                    <th class="right">"Qty/build"</th>
+                                    <th class="right">"Overage"</th>
+                                    <th>"Remarks"</th>
+                                </tr></thead>
+                                <tbody>{
+                                    items.into_iter().map(|r| view! {
+                                        <PartProjectRow r=r/>
+                                    }).collect::<Vec<_>>()
+                                }</tbody>
+                            </table>
+                        </CollapsibleSection>
+                    }.into_any()
+                }
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn PartProjectRow(r: PartProjectRef) -> impl IntoView {
+    let pane_mode = expect_context::<LeftPaneModeState>().0;
+    let selected_project = expect_context::<SelectedProject>().0;
+    let project_id = r.project_id;
+    let project_name = r.project_name.clone();
+    let qty = r.quantity;
+    let overage_disp = match (r.overage, r.overage_type.as_str()) {
+        (0, _)         => "—".to_string(),
+        (n, "percent") => format!("+{n}%"),
+        (n, _)         => format!("+{n}"),
+    };
+    let remarks = r.remarks.clone().unwrap_or_default();
+
+    let on_jump = move |_: leptos::ev::MouseEvent| {
+        selected_project.set(Some(project_id));
+        pane_mode.set(LeftPaneMode::Projects);
+    };
+
+    view! {
+        <tr>
+            <td>
+                <a class="project-link" href="javascript:void(0)" on:click=on_jump>
+                    {project_name}
+                </a>
+            </td>
+            <td class="right">{qty}</td>
+            <td class="right">{overage_disp}</td>
+            <td class="muted">{remarks}</td>
+        </tr>
+    }
+}
+
+#[component]
+fn PartRunsSection(part_id: i32) -> impl IntoView {
+    let data_version = expect_context::<DataVersion>().0;
+    let resource = LocalResource::new(move || {
+        let _ = data_version.get();
+        api::fetch_part_runs(part_id)
+    });
+    view! {
+        <Suspense fallback=|| ()>
+            {move || resource.get().map(|res| match &*res {
+                Err(_) => ().into_any(),
+                Ok(rows) if rows.is_empty() => ().into_any(),
+                Ok(rows) => {
+                    let title = format!("Recent project runs ({})", rows.len());
+                    let items = rows.clone();
+                    view! {
+                        <CollapsibleSection title=title>
+                            <table class="sub">
+                                <thead><tr>
+                                    <th>"When"</th>
+                                    <th>"Project"</th>
+                                    <th class="right">"Deducted"</th>
+                                    <th>"Lot"</th>
+                                </tr></thead>
+                                <tbody>{
+                                    items.into_iter().map(|r| view! {
+                                        <PartRunRow r=r/>
+                                    }).collect::<Vec<_>>()
+                                }</tbody>
+                            </table>
+                        </CollapsibleSection>
+                    }.into_any()
+                }
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn PartRunRow(r: PartRunRef) -> impl IntoView {
+    let pane_mode = expect_context::<LeftPaneModeState>().0;
+    let selected_project = expect_context::<SelectedProject>().0;
+    let project_id = r.project_id;
+    let when = r.run_date_time.clone()
+        .map(|s| trim_iso(&s))
+        .unwrap_or_else(|| "(no date)".into());
+    let project_name = r.project_name.clone();
+    let deducted = r.deducted_quantity;
+    let lot = if r.lot_number.is_empty() { "—".to_string() } else { r.lot_number.clone() };
+
+    let on_jump = move |_: leptos::ev::MouseEvent| {
+        selected_project.set(Some(project_id));
+        pane_mode.set(LeftPaneMode::Projects);
+    };
+
+    view! {
+        <tr>
+            <td class="run-when">{when}</td>
+            <td>
+                <a class="project-link" href="javascript:void(0)" on:click=on_jump>
+                    {project_name}
+                </a>
+            </td>
+            <td class="right">{deducted}</td>
+            <td class="muted">{lot}</td>
+        </tr>
+    }
+}
+
+fn trim_iso(s: &str) -> String {
+    s.split('.').next().unwrap_or(s).replacen('T', " ", 1)
 }
 
 #[component]
@@ -370,9 +633,6 @@ fn render_parameter_value(p: &PartParameterView) -> String {
     }
 }
 
-fn format_bytes(n: i32) -> String {
-    let n = n as f64;
-    if n < 1024.0 { format!("{n:.0} B") }
-    else if n < 1024.0 * 1024.0 { format!("{:.1} KB", n / 1024.0) }
-    else { format!("{:.1} MB", n / 1024.0 / 1024.0) }
-}
+// Note: format_bytes used to live here for the attachments section.
+// It's now in components/attachments_section.rs where the section
+// renders itself. Remove once we're sure nothing else needs it.

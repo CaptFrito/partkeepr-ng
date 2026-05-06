@@ -32,6 +32,10 @@ pub struct PartCategoryNode {
     pub name: String,
     pub lvl: i32,
     pub category_path: String,
+    /// Direct part count for this category (does NOT include parts in
+    /// descendants). Surfaced so the delete dialog can refuse upfront
+    /// without a follow-up roundtrip.
+    pub part_count: i64,
     pub children: Vec<PartCategoryNode>,
 }
 
@@ -45,11 +49,18 @@ pub async fn category_tree(
         name: String,
         lvl: i32,
         category_path: Option<String>,
+        part_count: i64,
     }
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT id, parent_id, name, lvl, categoryPath AS category_path \
-         FROM PartCategory ORDER BY lft",
+        "SELECT pc.id, pc.parent_id, pc.name, pc.lvl, \
+                pc.categoryPath AS category_path, \
+                COALESCE(pc_counts.cnt, 0) AS part_count \
+         FROM PartCategory pc \
+         LEFT JOIN (SELECT category_id, COUNT(*) AS cnt \
+                    FROM Part GROUP BY category_id) pc_counts \
+           ON pc_counts.category_id = pc.id \
+         ORDER BY pc.lft",
     )
     .fetch_all(&pool)
     .await?;
@@ -76,6 +87,7 @@ pub async fn category_tree(
             name: r.name.clone(),
             lvl: r.lvl,
             category_path: r.category_path.clone().unwrap_or_default(),
+            part_count: r.part_count,
             children,
         }
     }
@@ -96,8 +108,22 @@ pub async fn category_tree(
 pub struct ListQuery {
     /// Category id to filter by. Includes descendants via lft/rgt containment.
     pub category: Option<i32>,
+    /// Storage-location category id; includes all locations under that
+    /// folder's nested-set subtree, then all parts in those locations.
+    pub storage_folder: Option<i32>,
+    /// Exact StorageLocation id; filters parts whose storageLocation_id matches.
+    pub storage_location: Option<i32>,
+    /// FootprintCategory id; includes any footprint whose category is in
+    /// the folder's nested-set subtree.
+    pub footprint_folder: Option<i32>,
+    /// Exact Footprint id; filters parts whose footprint_id matches.
+    pub footprint: Option<i32>,
     /// LIKE-search across name / description / internalPartNumber.
     pub search: Option<String>,
+    /// Slice 11 follow-up: filter by meta-part flag.
+    /// `None` = both real and meta parts (default), `Some(true)` = only
+    /// meta-parts, `Some(false)` = only real parts.
+    pub meta_only: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
     /// Sort column. One of: id, name, description, stock_level,
@@ -160,9 +186,42 @@ pub async fn list(
     if q.category.is_some() {
         where_clauses.push("cp.lft >= cf.lft AND cp.rgt <= cf.rgt");
     }
+    if q.storage_location.is_some() {
+        where_clauses.push("p.storageLocation_id = ?");
+    }
+    if q.storage_folder.is_some() {
+        // Containment via the folder's lft/rgt: any storage location
+        // whose category is in the folder's subtree counts.
+        where_clauses.push(
+            "p.storageLocation_id IN (\
+                SELECT sl.id FROM StorageLocation sl \
+                JOIN StorageLocationCategory slc ON slc.id = sl.category_id \
+                JOIN StorageLocationCategory sf ON sf.id = ? \
+                WHERE slc.lft >= sf.lft AND slc.rgt <= sf.rgt)",
+        );
+    }
+    if q.footprint.is_some() {
+        where_clauses.push("p.footprint_id = ?");
+    }
+    if q.footprint_folder.is_some() {
+        where_clauses.push(
+            "p.footprint_id IN (\
+                SELECT f.id FROM Footprint f \
+                JOIN FootprintCategory fc ON fc.id = f.category_id \
+                JOIN FootprintCategory ff ON ff.id = ? \
+                WHERE fc.lft >= ff.lft AND fc.rgt <= ff.rgt)",
+        );
+    }
     if q.search.is_some() {
         where_clauses
             .push("(p.name LIKE ? OR p.description LIKE ? OR p.internalPartNumber LIKE ?)");
+    }
+    if let Some(only) = q.meta_only {
+        if only {
+            where_clauses.push("p.metaPart = 1");
+        } else {
+            where_clauses.push("(p.metaPart = 0 OR p.metaPart IS NULL)");
+        }
     }
     let where_part = if where_clauses.is_empty() {
         String::new()
@@ -199,6 +258,22 @@ pub async fn list(
     if let Some(cat) = q.category {
         sel = sel.bind(cat);
         cnt = cnt.bind(cat);
+    }
+    if let Some(loc) = q.storage_location {
+        sel = sel.bind(loc);
+        cnt = cnt.bind(loc);
+    }
+    if let Some(folder) = q.storage_folder {
+        sel = sel.bind(folder);
+        cnt = cnt.bind(folder);
+    }
+    if let Some(fp) = q.footprint {
+        sel = sel.bind(fp);
+        cnt = cnt.bind(fp);
+    }
+    if let Some(folder) = q.footprint_folder {
+        sel = sel.bind(folder);
+        cnt = cnt.bind(folder);
     }
     if let Some(s) = q.search.as_deref() {
         let pat = format!("%{s}%");
@@ -324,6 +399,22 @@ pub struct PartAttachmentView {
 }
 
 #[derive(Debug, Serialize, FromRow)]
+pub struct MetaPartCriterionView {
+    pub id: i32,
+    /// Schema column is `partParameterName`; renamed for the wire to
+    /// match the predicate / parameter naming used elsewhere.
+    pub name: String,
+    pub op: String,
+    pub value_type: String,
+    pub value: Option<f64>,
+    pub string_value: String,
+    pub si_prefix_id: Option<i32>,
+    pub si_prefix_symbol: Option<String>,
+    pub unit_id: Option<i32>,
+    pub unit_symbol: Option<String>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
 pub struct StockEntryView {
     pub id: i32,
     #[sqlx(rename = "stockLevel")]
@@ -351,6 +442,8 @@ pub struct PartDetail {
     pub parameters: Vec<PartParameterView>,
     pub attachments: Vec<PartAttachmentView>,
     pub stock_entries: Vec<StockEntryView>,
+    /// Slice 11c: meta-part criteria. Empty for non-meta parts.
+    pub criteria: Vec<MetaPartCriterionView>,
 }
 
 const STOCK_ENTRY_LIMIT: i64 = 50;
@@ -471,6 +564,27 @@ pub async fn detail(
     .fetch_all(&pool)
     .await?;
 
+    let criteria: Vec<MetaPartCriterionView> = sqlx::query_as(
+        "SELECT mc.id, \
+                mc.partParameterName AS name, \
+                mc.operator          AS op, \
+                mc.valueType         AS value_type, \
+                mc.value, \
+                mc.stringValue       AS string_value, \
+                mc.siPrefix_id       AS si_prefix_id, \
+                sp.symbol            AS si_prefix_symbol, \
+                mc.unit_id, \
+                u.symbol             AS unit_symbol \
+         FROM MetaPartParameterCriteria mc \
+         LEFT JOIN SiPrefix sp ON sp.id = mc.siPrefix_id \
+         LEFT JOIN Unit u      ON u.id  = mc.unit_id \
+         WHERE mc.part_id = ? \
+         ORDER BY mc.partParameterName, mc.id",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
     Ok(Json(PartDetail {
         part,
         category,
@@ -482,6 +596,7 @@ pub async fn detail(
         parameters,
         attachments,
         stock_entries,
+        criteria,
     }))
 }
 
@@ -519,6 +634,29 @@ pub struct PartWrite {
     pub manufacturers: Option<Vec<PartManufacturerWrite>>,
     pub distributors: Option<Vec<PartDistributorWrite>>,
     pub parameters: Option<Vec<PartParameterWrite>>,
+    /// Slice 11c: meta-part criteria. Only meaningful when `meta_part`
+    /// is true; ignored otherwise (we still write through, since the
+    /// storage is independent of the flag).
+    pub criteria: Option<Vec<MetaPartCriterionWrite>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetaPartCriterionWrite {
+    /// Parameter name to match against (`partParameterName` column).
+    pub name: String,
+    /// One of `=`, `!=`, `<`, `<=`, `>`, `>=`, `like`, `in`. Same set
+    /// as parametric predicates.
+    pub op: String,
+    /// "string" | "numeric".
+    pub value_type: String,
+    #[serde(default)]
+    pub string_value: Option<String>,
+    #[serde(default)]
+    pub value: Option<f64>,
+    #[serde(default)]
+    pub si_prefix_id: Option<i32>,
+    #[serde(default)]
+    pub unit_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -671,6 +809,10 @@ pub async fn update(
         sqlx::query("DELETE FROM PartParameter WHERE part_id = ?")
             .bind(id).execute(&mut *tx).await?;
     }
+    if req.criteria.is_some() {
+        sqlx::query("DELETE FROM MetaPartParameterCriteria WHERE part_id = ?")
+            .bind(id).execute(&mut *tx).await?;
+    }
 
     insert_children(&mut tx, id, &req).await?;
 
@@ -698,7 +840,9 @@ async fn insert_children(
     // caps < 1 nF" finds both 500 pF and 0.5 nF) requires the
     // normalized representation to be stored at write time.
     let mut prefixes: HashMap<i32, (i32, i32)> = HashMap::new();
-    if req.parameters.as_ref().is_some_and(|v| !v.is_empty()) {
+    let need_prefixes = req.parameters.as_ref().is_some_and(|v| !v.is_empty())
+        || req.criteria.as_ref().is_some_and(|v| !v.is_empty());
+    if need_prefixes {
         let rows: Vec<(i32, i32, i32)> = sqlx::query_as(
             "SELECT id, base, exponent FROM SiPrefix",
         )
@@ -779,6 +923,52 @@ async fn insert_children(
         .bind(&p.value_type)
         .bind(p.min_si_prefix_id)
         .bind(p.max_si_prefix_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(map_fk_err)?;
+    }
+    for c in req.criteria.iter().flatten() {
+        if c.value_type != "string" && c.value_type != "numeric" {
+            return Err(AppError::BadRequest(
+                "criterion value_type must be 'string' or 'numeric'",
+            ));
+        }
+        if !matches!(
+            c.op.as_str(),
+            "=" | "!=" | "<" | "<=" | ">" | ">=" | "like" | "in"
+        ) {
+            return Err(AppError::BadRequest(
+                "criterion op must be one of =, !=, <, <=, >, >=, like, in",
+            ));
+        }
+        if c.value_type == "numeric" && c.op == "like" {
+            return Err(AppError::BadRequest(
+                "operator 'like' is only valid for string criteria",
+            ));
+        }
+        if c.name.trim().is_empty() {
+            return Err(AppError::BadRequest("criterion.name is required"));
+        }
+        let normalized_value = normalize(c.value, c.si_prefix_id);
+        // The schema declares stringValue NOT NULL — coerce missing
+        // values to empty string. For numeric criteria the field is
+        // unused; the column is just legacy ballast.
+        let string_value = c.string_value.clone().unwrap_or_default();
+        sqlx::query(
+            "INSERT INTO MetaPartParameterCriteria \
+                (part_id, unit_id, partParameterName, operator, value, \
+                 normalizedValue, stringValue, valueType, siPrefix_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(part_id)
+        .bind(c.unit_id)
+        .bind(&c.name)
+        .bind(&c.op)
+        .bind(c.value)
+        .bind(normalized_value)
+        .bind(string_value)
+        .bind(&c.value_type)
+        .bind(c.si_prefix_id)
         .execute(&mut **tx)
         .await
         .map_err(map_fk_err)?;
