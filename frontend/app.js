@@ -36,7 +36,22 @@
             if (!r.ok) throw new Error(`category tree failed: ${r.status}`);
             return r.json();
         },
-        async parts({ filter, search, byField, limit = 500, offset = 0 } = {}) {
+        async parts({ filter, search, byField, predicates, limit = 500, offset = 0 } = {}) {
+            // When predicates are set, switch to the parametric search
+            // endpoint — same filter shape carried in the body.
+            if (predicates && predicates.length) {
+                const body = { predicates, limit, offset };
+                if (filter && filter.kind && filter.id != null) body[filter.kind] = filter.id;
+                if (search) body.search = search;
+                if (byField) Object.assign(body, byField);
+                const r = await fetch("/api/parts/parametric", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) throw new Error(`parametric search failed: ${r.status} ${await r.text()}`);
+                return r.json();
+            }
             const p = new URLSearchParams();
             if (filter && filter.kind && filter.id != null) {
                 p.set(filter.kind, String(filter.id));
@@ -53,6 +68,11 @@
             p.set("offset", String(offset));
             const r = await fetch("/api/parts?" + p.toString());
             if (!r.ok) throw new Error(`parts list failed: ${r.status}`);
+            return r.json();
+        },
+        async parametricNames() {
+            const r = await fetch("/api/part_parameters/names");
+            if (!r.ok) throw new Error(`names failed: ${r.status}`);
             return r.json();
         },
         async storageTree() {
@@ -2759,7 +2779,9 @@
     //              "footprint_folder"|"footprint", id: number }.
     // byField holds the optional flat predicates exposed by the filter
     // pane (stock_mode, meta_only, distributor_id, price_min/max).
-    let currentParts = { filter: null, search: "", byField: {} };
+    // predicates holds the parametric-pane predicates (W9). When set,
+    // the parts grid is populated from /api/parts/parametric instead.
+    let currentParts = { filter: null, search: "", byField: {}, predicates: [] };
 
     function buildCenterPane() {
         return {
@@ -2820,6 +2842,22 @@
                             },
                         },
                         { view: "button", value: "⊞ Columns", width: 110, click: openColumnsDialog },
+                        {
+                            view: "toggle",
+                            id: "pk-parametric-toggle",
+                            type: "iconButton",
+                            label: "▾ Parametric",
+                            offLabel: "▸ Parametric",
+                            width: 115,
+                            on: {
+                                onChange: function (newVal) {
+                                    const pane = $$("pk-parametric-pane");
+                                    if (!pane) return;
+                                    if (newVal) pane.show();
+                                    else pane.hide();
+                                },
+                            },
+                        },
                         {
                             view: "search",
                             id: "pk-search",
@@ -2896,6 +2934,113 @@
                         {},
                         { view: "button", value: "Apply", css: "webix_primary", width: 90, click: applyFilters },
                         { view: "button", value: "Reset", width: 90, click: resetFilters },
+                    ],
+                },
+                {
+                    id: "pk-parametric-pane",
+                    css: "pk-filters-pane",
+                    hidden: true,
+                    rows: [
+                        {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 32,
+                            cols: [
+                                { view: "label", label: "Parameter predicates (AND-combined)", css: "pk-pane-title" },
+                                {},
+                                { view: "button", value: "+ Add predicate", css: "pk-btn-add", width: 130, click: addParametricPredicate },
+                                { view: "button", value: "− Remove", css: "pk-btn-remove", width: 90, click: removeParametricPredicate },
+                            ],
+                        },
+                        {
+                            view: "datatable",
+                            id: "pk-parametric-grid",
+                            css: "pk-grid",
+                            height: 180,
+                            editable: true,
+                            // Single click both edits AND selects (the
+                            // onBeforeEditStart hook below ensures the
+                            // row is selected so − Remove sees it).
+                            editaction: "click",
+                            select: "row",
+                            on: {
+                                onBeforeEditStart: function (state) {
+                                    if (state && state.row) this.select(state.row);
+                                },
+                            },
+                            columns: [
+                                {
+                                    id: "name",
+                                    header: "Parameter",
+                                    width: 200,
+                                    editor: "combo",
+                                    options: [],  // populated lazily
+                                },
+                                {
+                                    id: "op",
+                                    header: "Op",
+                                    width: 70,
+                                    editor: "richselect",
+                                    options: [
+                                        { id: "=", value: "=" },
+                                        { id: "!=", value: "≠" },
+                                        { id: "<", value: "<" },
+                                        { id: "<=", value: "≤" },
+                                        { id: ">", value: ">" },
+                                        { id: ">=", value: "≥" },
+                                        { id: "like", value: "like" },
+                                    ],
+                                },
+                                {
+                                    id: "value_type",
+                                    header: "Type",
+                                    width: 90,
+                                    editor: "richselect",
+                                    options: [
+                                        { id: "numeric", value: "numeric" },
+                                        { id: "string", value: "string" },
+                                    ],
+                                },
+                                { id: "value", header: "Value", width: 100, editor: "text", css: "pk-numeric" },
+                                {
+                                    id: "si_prefix_id",
+                                    header: "Prefix",
+                                    width: 100,
+                                    editor: "richselect",
+                                    options: [],  // populated by ensureParametricLookupsReady
+                                    template: function (o) {
+                                        if (!o.si_prefix_id || !lookupsCache) return "";
+                                        const p = (lookupsCache.prefixes || []).find((x) => String(x.id) === String(o.si_prefix_id));
+                                        return p ? escapeHtml(p.symbol) : "";
+                                    },
+                                },
+                                {
+                                    id: "unit_id",
+                                    header: "Unit",
+                                    width: 130,
+                                    editor: "richselect",
+                                    options: [],
+                                    template: function (o) {
+                                        if (!o.unit_id || !lookupsCache) return "";
+                                        const u = (lookupsCache.units || []).find((x) => String(x.id) === String(o.unit_id));
+                                        return u ? escapeHtml(u.name + " (" + u.symbol + ")") : "";
+                                    },
+                                },
+                                { id: "string_value", header: "String value", fillspace: true, editor: "text" },
+                            ],
+                            data: [],
+                        },
+                        {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 38,
+                            cols: [
+                                { view: "label", label: '<span class="pk-help-hint">Numeric: fill Value + Prefix + Unit · String: use String value</span>' },
+                                {},
+                                { view: "button", value: "Apply parametric", css: "webix_primary", width: 150, click: applyParametricSearch },
+                                { view: "button", value: "Reset", width: 90, click: resetParametricSearch },
+                            ],
+                        },
                     ],
                 },
                 {
@@ -3794,11 +3939,13 @@
         if ("filter" in opts) currentParts.filter = opts.filter;
         if ("search" in opts) currentParts.search = opts.search;
         if ("byField" in opts) currentParts.byField = opts.byField;
+        if ("predicates" in opts) currentParts.predicates = opts.predicates;
         try {
             const json = await api.parts({
                 filter: currentParts.filter,
                 search: currentParts.search,
                 byField: currentParts.byField,
+                predicates: currentParts.predicates,
                 limit: 500,
                 offset: 0,
             });
@@ -3813,6 +3960,9 @@
                 if (currentParts.byField.meta_only === false) fbits.push("real only");
                 if (currentParts.byField.distributor_id) fbits.push("distributor");
                 if (currentParts.byField.price_min || currentParts.byField.price_max) fbits.push("price range");
+            }
+            if (currentParts.predicates && currentParts.predicates.length) {
+                fbits.push(`${currentParts.predicates.length} predicate${currentParts.predicates.length === 1 ? "" : "s"}`);
             }
             const filterSuffix = fbits.length ? ` · ${fbits.join(" · ")}` : "";
             $$("pk-parts-status").setValue(`${json.items.length} of ${json.total} parts${filterSuffix}`);
@@ -4128,6 +4278,97 @@
     function applyFilters() {
         ensureFilterDistributorsLoaded();
         loadParts({ byField: readFiltersFromPane() });
+    }
+
+    // ============================================================
+    //  Parametric search pane (W9)
+    // ============================================================
+
+    let parametricLookupsReady = false;
+
+    async function ensureParametricLookupsReady() {
+        if (parametricLookupsReady) return;
+        try {
+            const [names, lk] = await Promise.all([
+                api.parametricNames(),
+                ensureLookups(),
+            ]);
+            const grid = $$("pk-parametric-grid");
+            if (!grid) return;
+
+            // Param-name combo: option id = the parameter name string,
+            // value = same. No custom body template — would render HTML
+            // into the cell value when an option is picked.
+            grid.getColumnConfig("name").options = names.map((n) => ({ id: n.name, value: n.name }));
+
+            const prefOptions = [{ id: "", value: "(none)" }].concat(
+                lk.prefixes.map((p) => ({ id: p.id, value: p.symbol + " — " + p.prefix }))
+            );
+            const unitOptions = [{ id: "", value: "(none)" }].concat(
+                lk.units.map((u) => ({ id: u.id, value: u.name + " (" + u.symbol + ")" }))
+            );
+            grid.getColumnConfig("si_prefix_id").options = prefOptions;
+            grid.getColumnConfig("unit_id").options = unitOptions;
+            grid.refreshColumns();
+            parametricLookupsReady = true;
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load parameter names" });
+        }
+    }
+
+    async function addParametricPredicate() {
+        await ensureParametricLookupsReady();
+        const grid = $$("pk-parametric-grid");
+        if (!grid) return;
+        const row = { id: webix.uid(), name: "", op: "=", value_type: "numeric", value: "", string_value: "", si_prefix_id: null, unit_id: null };
+        grid.add(row);
+        grid.select(row.id);
+        grid.editCell(row.id, "name");
+    }
+
+    function removeParametricPredicate() {
+        const grid = $$("pk-parametric-grid");
+        if (!grid) return;
+        const sel = grid.getSelectedId();
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a predicate row." });
+            return;
+        }
+        grid.remove(sel);
+    }
+
+    function applyParametricSearch() {
+        const grid = $$("pk-parametric-grid");
+        if (!grid) return;
+        const rows = grid.serialize().filter((r) => (r.name || "").trim() && r.op);
+        if (!rows.length) {
+            webix.message({ type: "error", text: "Add at least one predicate row." });
+            return;
+        }
+        const predicates = rows.map((r) => {
+            const isNumeric = r.value_type !== "string";
+            const p = {
+                name: r.name.trim(),
+                op: r.op,
+                value_type: isNumeric ? "numeric" : "string",
+            };
+            if (isNumeric) {
+                if (r.value !== "" && r.value != null) p.value = parseFloat(r.value);
+                if (r.si_prefix_id) p.si_prefix_id = parseInt(r.si_prefix_id, 10);
+                if (r.unit_id) p.unit_id = parseInt(r.unit_id, 10);
+            } else {
+                if (r.string_value) p.string_value = r.string_value;
+            }
+            return p;
+        });
+        loadParts({ predicates });
+    }
+
+    function resetParametricSearch() {
+        const grid = $$("pk-parametric-grid");
+        if (grid) grid.clearAll();
+        loadParts({ predicates: [] });
     }
 
     function resetFilters() {
