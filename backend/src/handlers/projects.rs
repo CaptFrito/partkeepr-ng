@@ -28,6 +28,7 @@ use serde_json::json;
 use sqlx::{FromRow, MySqlPool};
 
 use crate::error::AppError;
+use crate::handlers::auth::CurrentUser;
 use crate::handlers::parts::PartAttachmentView;
 use crate::handlers::stock;
 
@@ -244,12 +245,16 @@ pub async fn detail(
 
 pub async fn create(
     State(pool): State<MySqlPool>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
     Json(req): Json<ProjectWrite>,
 ) -> Result<impl IntoResponse, AppError> {
     validate_project(&req)?;
-    let res = sqlx::query("INSERT INTO Project (name, description) VALUES (?, ?)")
+    let res = sqlx::query(
+        "INSERT INTO Project (name, description, user_id) VALUES (?, ?, ?)",
+    )
         .bind(req.name.trim())
         .bind(req.description.as_deref())
+        .bind(user.user_id)
         .execute(&pool)
         .await?;
     Ok((
@@ -638,6 +643,7 @@ pub struct RunResult {
 /// back.
 pub async fn run_project(
     State(pool): State<MySqlPool>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
     Path(pid): Path<i32>,
     Json(req): Json<RunRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -789,6 +795,7 @@ pub async fn run_project(
                 None,
                 Some(&comment_base),
                 false,
+                user.user_id,
             )
             .await
             .map_err(|e| match e {
@@ -883,6 +890,7 @@ pub struct DeleteRunQuery {
 /// up test/staging projects.
 pub async fn delete_run(
     State(pool): State<MySqlPool>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
     Path((pid, rid)): Path<(i32, i32)>,
     Query(q): Query<DeleteRunQuery>,
 ) -> Result<StatusCode, AppError> {
@@ -920,6 +928,7 @@ pub async fn delete_run(
                         None,
                         Some(&comment),
                         false,
+                        user.user_id,
                     )
                     .await?;
                 }

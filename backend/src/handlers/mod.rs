@@ -180,19 +180,19 @@ pub fn routes() -> Router<AppState> {
                 .put(projects::update)
                 .delete(projects::delete),
         )
-        .route("/api/projects/:pid/parts", post(projects::add_part))
+        .route("/api/projects/:id/parts", post(projects::add_part))
         .route(
-            "/api/projects/:pid/parts/:ppid",
+            "/api/projects/:id/parts/:ppid",
             axum::routing::put(projects::update_part).delete(projects::remove_part),
         )
         // Slice 8b: Project runs.
         .route(
-            "/api/projects/:pid/runs",
+            "/api/projects/:id/runs",
             get(projects::list_runs).post(projects::run_project),
         )
-        .route("/api/projects/:pid/runs/preview", get(projects::run_preview))
+        .route("/api/projects/:id/runs/preview", get(projects::run_preview))
         .route(
-            "/api/projects/:pid/runs/:rid",
+            "/api/projects/:id/runs/:rid",
             axum::routing::delete(projects::delete_run),
         )
         // Slice 8c: cross-cutting run views.

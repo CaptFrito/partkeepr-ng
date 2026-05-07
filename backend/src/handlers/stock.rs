@@ -17,6 +17,7 @@ use serde::Deserialize;
 use sqlx::MySqlPool;
 
 use crate::error::AppError;
+use crate::handlers::auth::CurrentUser;
 use crate::models::part::Part;
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +35,7 @@ pub struct StockChange {
 
 pub async fn create_stock_entry(
     State(pool): State<MySqlPool>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
     Path(part_id): Path<i32>,
     Json(req): Json<StockChange>,
 ) -> Result<Json<Part>, AppError> {
@@ -49,6 +51,7 @@ pub async fn create_stock_entry(
         req.price,
         req.comment.as_deref(),
         req.correction,
+        user.user_id,
     )
     .await?;
     let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
@@ -74,6 +77,7 @@ pub async fn apply_stock_change_in_tx(
     price: Option<Decimal>,
     comment: Option<&str>,
     correction: bool,
+    user_id: i32,
 ) -> Result<(i32, bool), AppError> {
     if delta == 0 {
         return Err(AppError::BadRequest("stock delta cannot be zero"));
@@ -91,9 +95,10 @@ pub async fn apply_stock_change_in_tx(
     sqlx::query(
         "INSERT INTO StockEntry \
             (part_id, user_id, stockLevel, price, dateTime, correction, comment) \
-         VALUES (?, NULL, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(part_id)
+    .bind(user_id)
     .bind(delta)
     .bind(price)
     .bind(now)
