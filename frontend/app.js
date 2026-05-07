@@ -165,6 +165,72 @@
                 ]);
             return { categories_tree, footprints, manufacturers, distributors, storage_locations, part_units, units, prefixes };
         },
+
+        // Storage location categories
+        async createStorageCategory(body) {
+            const r = await fetch("/api/storage_location_categories", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create storage cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateStorageCategory(id, body) {
+            const r = await fetch(`/api/storage_location_categories/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update storage cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteStorageCategory(id) {
+            const r = await fetch(`/api/storage_location_categories/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete storage cat failed: ${r.status} ${await r.text()}`);
+        },
+        async moveStorageCategory(id, newParentId) {
+            const r = await fetch(`/api/storage_location_categories/${id}/move`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ new_parent_id: newParentId }),
+            });
+            if (!r.ok) throw new Error(`move storage cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async storageCategoryById(id) {
+            const r = await fetch("/api/storage_location_categories");
+            if (!r.ok) return null;
+            const flat = await r.json();
+            return flat.find((c) => c.id === id) || null;
+        },
+
+        // Storage locations (leaves)
+        async createStorageLocation(body) {
+            const r = await fetch("/api/storage_locations", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create storage location failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateStorageLocation(id, body) {
+            const r = await fetch(`/api/storage_locations/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update storage location failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteStorageLocation(id) {
+            const r = await fetch(`/api/storage_locations/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete storage location failed: ${r.status} ${await r.text()}`);
+        },
+        async moveStorageLocation(id, newCategoryId) {
+            const r = await fetch(`/api/storage_locations/${id}/move`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ new_category_id: newCategoryId }),
+            });
+            if (!r.ok) throw new Error(`move storage location failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
     };
 
     // ============================================================
@@ -332,7 +398,10 @@
                             id: "tab-categories",
                             rows: [buildCategoryActionToolbar(), buildCategoryTreeView()],
                         },
-                        { id: "tab-storage", rows: [buildStorageTreeView()] },
+                        {
+                            id: "tab-storage",
+                            rows: [buildStorageActionToolbar(), buildStorageTreeView()],
+                        },
                         { id: "tab-footprints", rows: [buildFootprintTreeView()] },
                         { id: "tab-lookups", rows: [buildLookupsStub()] },
                     ],
@@ -542,8 +611,47 @@
         });
     }
 
-    // Generic add/edit dialog for nodes that have just (name, description).
+    // Generic add/edit dialog for nodes with name + (optional) description.
+    // Pass { omitDescription: true } for name-only forms (e.g. storage location).
     function showSimpleNameDescDialog(opts) {
+        const formElements = [
+            { view: "text", name: "name", label: "Name", labelWidth: 110, required: true },
+        ];
+        if (!opts.omitDescription) {
+            formElements.push({
+                view: "textarea", name: "description", label: "Description",
+                labelWidth: 110, height: 80,
+            });
+        }
+        formElements.push({
+            cols: [
+                {},
+                { view: "button", value: "Cancel", width: 90, click: () => $$("pk-edit-namedesc").close() },
+                {
+                    view: "button",
+                    value: opts.saveLabel || "Save",
+                    width: 100,
+                    css: "webix_primary",
+                    hotkey: "ctrl+s",
+                    click: async function () {
+                        const v = $$("pk-edit-namedesc-form").getValues();
+                        if (!v.name || !v.name.trim()) {
+                            webix.message({ type: "error", text: "Name is required" });
+                            return;
+                        }
+                        try {
+                            const payload = { name: v.name.trim() };
+                            if (!opts.omitDescription) payload.description = (v.description || "").trim();
+                            await opts.onSave(payload);
+                            $$("pk-edit-namedesc").close();
+                            webix.message({ text: "Saved", type: "success" });
+                        } catch (e) {
+                            webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                        }
+                    },
+                },
+            ],
+        });
         webix.ui({
             view: "window",
             id: "pk-edit-namedesc",
@@ -554,40 +662,14 @@
             body: {
                 view: "form",
                 id: "pk-edit-namedesc-form",
-                elements: [
-                    { view: "text", name: "name", label: "Name", labelWidth: 110, required: true },
-                    { view: "textarea", name: "description", label: "Description", labelWidth: 110, height: 80 },
-                    {
-                        cols: [
-                            {},
-                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-edit-namedesc").close() },
-                            {
-                                view: "button",
-                                value: opts.saveLabel || "Save",
-                                width: 100,
-                                css: "webix_primary",
-                                hotkey: "ctrl+s",
-                                click: async function () {
-                                    const v = $$("pk-edit-namedesc-form").getValues();
-                                    if (!v.name || !v.name.trim()) {
-                                        webix.message({ type: "error", text: "Name is required" });
-                                        return;
-                                    }
-                                    try {
-                                        await opts.onSave({ name: v.name.trim(), description: (v.description || "").trim() });
-                                        $$("pk-edit-namedesc").close();
-                                        webix.message({ text: "Saved", type: "success" });
-                                    } catch (e) {
-                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
-                                    }
-                                },
-                            },
-                        ],
-                    },
-                ],
+                elements: formElements,
             },
         }).show();
-        $$("pk-edit-namedesc-form").setValues(opts.initial || { name: "", description: "" });
+        const initial = opts.initial || {};
+        $$("pk-edit-namedesc-form").setValues({
+            name: initial.name || "",
+            description: initial.description || "",
+        });
     }
 
     // Move-to picker for the part-category tree.
@@ -729,6 +811,303 @@
             out.open = node.lvl === 0;
         }
         return out;
+    }
+
+    // --- Storage CRUD toolbar + dialogs ---
+
+    function buildStorageActionToolbar() {
+        return {
+            view: "toolbar",
+            css: "pk-pane-toolbar",
+            height: 38,
+            cols: [
+                { view: "button", value: "+ Sub", css: "pk-btn-add", width: 60, click: openStorageCategoryAdd },
+                { view: "button", value: "+ Loc", css: "pk-btn-add", width: 60, click: openStorageLocationAdd },
+                { view: "button", value: "✎", css: "webix_primary", width: 36, click: openStorageEdit },
+                { view: "button", value: "Move…", width: 70, click: openStorageMove },
+                { view: "button", value: "🗑", css: "pk-btn-remove", width: 36, click: confirmStorageDelete },
+                {},
+            ],
+        };
+    }
+
+    // Returns the contextual storage-category id for + actions:
+    //   folder selected → that folder's category_id
+    //   leaf selected   → its parent category's category_id
+    //   nothing selected → null
+    function getStorageContextCategoryId() {
+        const tree = $$("pk-storage-tree");
+        if (!tree) return null;
+        const id = tree.getSelectedId();
+        if (!id) return null;
+        const node = tree.getItem(id);
+        if (!node) return null;
+        if (node.kind === "folder") return node.category_id;
+        if (node.kind === "leaf") {
+            const parentId = tree.getParentId(id);
+            if (!parentId) return null;
+            const parent = tree.getItem(parentId);
+            return parent ? parent.category_id : null;
+        }
+        return null;
+    }
+
+    async function reloadStorageTreeAndGrid(reselectId) {
+        try {
+            const arr = await api.storageTree();
+            const tree = $$("pk-storage-tree");
+            tree.clearAll();
+            tree.parse(arr.map(transformStorageNode));
+            if (reselectId && tree.exists(reselectId)) {
+                tree.select(reselectId);
+                tree.open(reselectId);
+            } else if (arr.length) {
+                tree.open(transformStorageNode(arr[0]).id);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        await loadParts({});
+    }
+
+    function openStorageCategoryAdd() {
+        const parentId = getStorageContextCategoryId();
+        if (parentId == null) {
+            webix.message({ type: "error", text: "Select a storage folder first." });
+            return;
+        }
+        showSimpleNameDescDialog({
+            title: "New storage sub-category",
+            saveLabel: "Create",
+            initial: { name: "", description: "" },
+            onSave: async (v) => {
+                const created = await api.createStorageCategory({
+                    parent_id: parentId,
+                    name: v.name,
+                    description: v.description || null,
+                });
+                await reloadStorageTreeAndGrid("scat:" + created.id);
+            },
+        });
+    }
+
+    function openStorageLocationAdd() {
+        const parentId = getStorageContextCategoryId();
+        if (parentId == null) {
+            webix.message({ type: "error", text: "Select a storage folder first." });
+            return;
+        }
+        showSimpleNameDescDialog({
+            title: "New storage location",
+            saveLabel: "Create",
+            omitDescription: true,
+            initial: { name: "" },
+            onSave: async (v) => {
+                const created = await api.createStorageLocation({
+                    category_id: parentId,
+                    name: v.name,
+                });
+                await reloadStorageTreeAndGrid("sloc:" + created.id);
+            },
+        });
+    }
+
+    async function openStorageEdit() {
+        const tree = $$("pk-storage-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a folder or location to edit." });
+            return;
+        }
+        if (node.kind === "folder") {
+            if (node.lvl === 0) {
+                webix.message({ type: "error", text: "The root storage category cannot be renamed." });
+                return;
+            }
+            const full = await api.storageCategoryById(node.category_id);
+            showSimpleNameDescDialog({
+                title: `Edit storage category "${node.value}"`,
+                saveLabel: "Save",
+                initial: { name: node.value, description: (full && full.description) || "" },
+                onSave: async (v) => {
+                    await api.updateStorageCategory(node.category_id, {
+                        name: v.name,
+                        description: v.description || null,
+                    });
+                    await reloadStorageTreeAndGrid("scat:" + node.category_id);
+                },
+            });
+        } else {
+            // leaf — location edit, name only
+            showSimpleNameDescDialog({
+                title: `Edit storage location "${node.value}"`,
+                saveLabel: "Save",
+                omitDescription: true,
+                initial: { name: node.value },
+                onSave: async (v) => {
+                    await api.updateStorageLocation(node.location_id, { name: v.name });
+                    await reloadStorageTreeAndGrid("sloc:" + node.location_id);
+                },
+            });
+        }
+    }
+
+    function confirmStorageDelete() {
+        const tree = $$("pk-storage-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a folder or location to delete." });
+            return;
+        }
+        if (node.kind === "folder" && node.lvl === 0) {
+            webix.message({ type: "error", text: "The root storage category cannot be deleted." });
+            return;
+        }
+        const what = node.kind === "folder" ? "storage category" : "storage location";
+        webix.confirm({
+            title: `Delete ${what}`,
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text:
+                `Delete ${what} <b>${escapeHtml(node.value)}</b>?<br><br>` +
+                (node.kind === "folder"
+                    ? "Refused if it contains locations or sub-categories."
+                    : "Refused if any parts reference this location."),
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    if (node.kind === "folder") {
+                        await api.deleteStorageCategory(node.category_id);
+                    } else {
+                        await api.deleteStorageLocation(node.location_id);
+                    }
+                    await reloadStorageTreeAndGrid();
+                    webix.message({ text: `${what} deleted`, type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function openStorageMove() {
+        const tree = $$("pk-storage-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a folder or location to move." });
+            return;
+        }
+        if (node.kind === "folder" && node.lvl === 0) {
+            webix.message({ type: "error", text: "The root storage category cannot be moved." });
+            return;
+        }
+        const isFolder = node.kind === "folder";
+        showStoragePickerDialog({
+            title: isFolder
+                ? `Move "${node.value}" to…`
+                : `Move location "${node.value}" to…`,
+            hint: "Pick a new parent storage category:",
+            excludeCategoryId: isFolder ? node.category_id : null,
+            onPick: async (newCatId) => {
+                if (isFolder) {
+                    await api.moveStorageCategory(node.category_id, newCatId);
+                    await reloadStorageTreeAndGrid("scat:" + node.category_id);
+                } else {
+                    await api.moveStorageLocation(node.location_id, newCatId);
+                    await reloadStorageTreeAndGrid("sloc:" + node.location_id);
+                }
+            },
+        });
+    }
+
+    // Folders-only transform: drop the `locations` arrays so the picker
+    // shows just the category structure (you can't put a category or a
+    // location *under* a location).
+    function transformStorageCategoryOnly(node) {
+        const out = {
+            id: "scat:" + node.id,
+            value: node.name,
+            kind: "folder",
+            lvl: node.lvl,
+            category_id: node.id,
+        };
+        if (node.children && node.children.length) {
+            out.data = node.children.map(transformStorageCategoryOnly);
+            out.open = node.lvl === 0;
+        }
+        return out;
+    }
+
+    function showStoragePickerDialog(opts) {
+        function exclude(arr, excludedId) {
+            if (excludedId == null) return arr;
+            return arr
+                .filter((n) => "scat:" + n.id !== excludedId)
+                .map((n) => Object.assign({}, n, {
+                    children: n.children ? exclude(n.children, excludedId) : [],
+                }));
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-storage-picker",
+            modal: true,
+            position: "center",
+            width: 460,
+            height: 560,
+            head: opts.title,
+            body: {
+                rows: [
+                    { template: opts.hint, height: 32, css: "pk-dialog-hint", borderless: true },
+                    {
+                        view: "tree",
+                        id: "pk-storage-picker-tree",
+                        select: true,
+                        template: treeNodeTemplate,
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 48,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-storage-picker").close() },
+                            {
+                                view: "button",
+                                value: "Move",
+                                width: 90,
+                                css: "webix_primary",
+                                click: async function () {
+                                    const t = $$("pk-storage-picker-tree");
+                                    const targetId = t.getSelectedId();
+                                    if (!targetId) {
+                                        webix.message({ type: "error", text: "Pick a target category" });
+                                        return;
+                                    }
+                                    const targetNode = t.getItem(targetId);
+                                    try {
+                                        await opts.onPick(targetNode.category_id);
+                                        $$("pk-storage-picker").close();
+                                        webix.message({ text: "Moved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Move failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        api.storageTree().then((arr) => {
+            const cleaned = exclude(arr, opts.excludeCategoryId ? "scat:" + opts.excludeCategoryId : null);
+            const t = $$("pk-storage-picker-tree");
+            t.clearAll();
+            t.parse(cleaned.map(transformStorageCategoryOnly));
+            if (cleaned.length) t.open("scat:" + cleaned[0].id);
+        });
     }
 
     // --- Footprint tree (categories + footprints as leaves) ---
