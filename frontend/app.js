@@ -36,12 +36,19 @@
             if (!r.ok) throw new Error(`category tree failed: ${r.status}`);
             return r.json();
         },
-        async parts({ filter, search, limit = 500, offset = 0 } = {}) {
+        async parts({ filter, search, byField, limit = 500, offset = 0 } = {}) {
             const p = new URLSearchParams();
             if (filter && filter.kind && filter.id != null) {
                 p.set(filter.kind, String(filter.id));
             }
             if (search) p.set("search", search);
+            if (byField) {
+                if (byField.stock_mode) p.set("stock_mode", byField.stock_mode);
+                if (byField.meta_only != null) p.set("meta_only", String(byField.meta_only));
+                if (byField.distributor_id) p.set("distributor_id", String(byField.distributor_id));
+                if (byField.price_min != null && byField.price_min !== "") p.set("price_min", String(byField.price_min));
+                if (byField.price_max != null && byField.price_max !== "") p.set("price_max", String(byField.price_max));
+            }
             p.set("limit", String(limit));
             p.set("offset", String(offset));
             const r = await fetch("/api/parts?" + p.toString());
@@ -554,6 +561,7 @@
             ],
         });
         loadCategoryTree();
+        ensureFilterDistributorsLoaded();
 
         // Lazy-load the other trees the first time the user switches to
         // them. Webix tabbar with multiview:true auto-fires onChange when
@@ -2745,7 +2753,9 @@
     // Active filter for the parts grid. `filter` is null (= all parts)
     // or { kind: "category"|"storage_folder"|"storage_location"|
     //              "footprint_folder"|"footprint", id: number }.
-    let currentParts = { filter: null, search: "" };
+    // byField holds the optional flat predicates exposed by the filter
+    // pane (stock_mode, meta_only, distributor_id, price_min/max).
+    let currentParts = { filter: null, search: "", byField: {} };
 
     function buildCenterPane() {
         return {
@@ -2790,6 +2800,20 @@
                             click: () => openPartEditor("duplicate"),
                         },
                         {
+                            view: "toggle",
+                            id: "pk-filters-toggle",
+                            type: "iconButton",
+                            label: "▾ Filters",
+                            offLabel: "▸ Filters",
+                            width: 90,
+                            click: function () {
+                                const pane = $$("pk-filters-pane");
+                                if (!pane) return;
+                                if (this.getValue()) pane.show();
+                                else pane.hide();
+                            },
+                        },
+                        {
                             view: "search",
                             id: "pk-search",
                             placeholder: "Search name / description / IPN…",
@@ -2801,6 +2825,70 @@
                                 },
                             },
                         },
+                    ],
+                },
+                {
+                    id: "pk-filters-pane",
+                    view: "toolbar",
+                    css: "pk-filters-pane",
+                    height: 50,
+                    hidden: true,
+                    cols: [
+                        {
+                            view: "richselect",
+                            id: "pk-filter-stock",
+                            label: "Stock",
+                            labelWidth: 50,
+                            width: 180,
+                            value: "any",
+                            options: [
+                                { id: "any", value: "any" },
+                                { id: "in_stock", value: "in stock (>0)" },
+                                { id: "out_of_stock", value: "out of stock (=0)" },
+                                { id: "low_stock", value: "low stock (<min)" },
+                            ],
+                        },
+                        {
+                            view: "richselect",
+                            id: "pk-filter-meta",
+                            label: "Type",
+                            labelWidth: 50,
+                            width: 160,
+                            value: "any",
+                            options: [
+                                { id: "any", value: "any" },
+                                { id: "real", value: "real only" },
+                                { id: "meta", value: "meta only" },
+                            ],
+                        },
+                        {
+                            view: "richselect",
+                            id: "pk-filter-distributor",
+                            label: "Distributor",
+                            labelWidth: 80,
+                            width: 240,
+                            value: "",
+                            options: [{ id: "", value: "(any)" }],  // populated lazily
+                        },
+                        {
+                            view: "text",
+                            id: "pk-filter-price-min",
+                            label: "Price min",
+                            labelWidth: 75,
+                            width: 130,
+                            placeholder: "(any)",
+                        },
+                        {
+                            view: "text",
+                            id: "pk-filter-price-max",
+                            label: "max",
+                            labelWidth: 35,
+                            width: 110,
+                            placeholder: "(any)",
+                        },
+                        {},
+                        { view: "button", value: "Apply", css: "webix_primary", width: 90, click: applyFilters },
+                        { view: "button", value: "Reset", width: 90, click: resetFilters },
                     ],
                 },
                 {
@@ -3690,18 +3778,29 @@
         opts = opts || {};
         if ("filter" in opts) currentParts.filter = opts.filter;
         if ("search" in opts) currentParts.search = opts.search;
+        if ("byField" in opts) currentParts.byField = opts.byField;
         try {
             const json = await api.parts({
                 filter: currentParts.filter,
                 search: currentParts.search,
+                byField: currentParts.byField,
                 limit: 500,
                 offset: 0,
             });
             const grid = $$("pk-parts-grid");
             grid.clearAll();
             grid.parse(json.items);
-            const status = `${json.items.length} of ${json.total} parts`;
-            $$("pk-parts-status").setValue(status);
+            const fbits = [];
+            if (currentParts.search) fbits.push(`search "${currentParts.search}"`);
+            if (currentParts.byField) {
+                if (currentParts.byField.stock_mode) fbits.push(currentParts.byField.stock_mode.replace("_", " "));
+                if (currentParts.byField.meta_only === true) fbits.push("meta only");
+                if (currentParts.byField.meta_only === false) fbits.push("real only");
+                if (currentParts.byField.distributor_id) fbits.push("distributor");
+                if (currentParts.byField.price_min || currentParts.byField.price_max) fbits.push("price range");
+            }
+            const filterSuffix = fbits.length ? ` · ${fbits.join(" · ")}` : "";
+            $$("pk-parts-status").setValue(`${json.items.length} of ${json.total} parts${filterSuffix}`);
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Failed to load parts" });
@@ -3824,6 +3923,59 @@
             console.error(e);
             webix.message({ type: "error", text: "Failed to load part detail" });
         }
+    }
+
+    // ============================================================
+    //  Parts grid filter pane (W8a)
+    // ============================================================
+
+    let filterDistributorsLoaded = false;
+
+    async function ensureFilterDistributorsLoaded() {
+        if (filterDistributorsLoaded) return;
+        try {
+            const dists = await api.lookupList("/api/distributors");
+            const sel = $$("pk-filter-distributor");
+            if (!sel) return;
+            const options = [{ id: "", value: "(any)" }].concat(
+                dists.map((d) => ({ id: String(d.id), value: d.name }))
+            );
+            sel.define("options", options);
+            sel.refresh();
+            filterDistributorsLoaded = true;
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function readFiltersFromPane() {
+        const stock = $$("pk-filter-stock").getValue();
+        const meta = $$("pk-filter-meta").getValue();
+        const dist = $$("pk-filter-distributor").getValue();
+        const priceMin = ($$("pk-filter-price-min").getValue() || "").trim();
+        const priceMax = ($$("pk-filter-price-max").getValue() || "").trim();
+        const out = {};
+        if (stock && stock !== "any") out.stock_mode = stock;
+        if (meta === "real") out.meta_only = false;
+        else if (meta === "meta") out.meta_only = true;
+        if (dist) out.distributor_id = parseInt(dist, 10);
+        if (priceMin) out.price_min = priceMin;
+        if (priceMax) out.price_max = priceMax;
+        return out;
+    }
+
+    function applyFilters() {
+        ensureFilterDistributorsLoaded();
+        loadParts({ byField: readFiltersFromPane() });
+    }
+
+    function resetFilters() {
+        $$("pk-filter-stock").setValue("any");
+        $$("pk-filter-meta").setValue("any");
+        $$("pk-filter-distributor").setValue("");
+        $$("pk-filter-price-min").setValue("");
+        $$("pk-filter-price-max").setValue("");
+        loadParts({ byField: {} });
     }
 
     function jumpToProject(projectId) {

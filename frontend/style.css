@@ -242,6 +242,12 @@
     border-top: 1px solid #d8dde2 !important;
 }
 
+/* Parts grid filter pane (W8a) */
+.pk-filters-pane {
+    background: #f7f9fa !important;
+    border-bottom: 1px solid #d8dde2 !important;
+}
+
 /* Run-preview shortfall row + banner */
 .pk-row-shortfall {
     background: #fdecea !important;
