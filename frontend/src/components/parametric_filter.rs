@@ -16,19 +16,34 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 
-use crate::api::{self, Predicate};
+use crate::api::{self, FieldFilters, LookupOption, Predicate};
 use crate::types::{ParameterNameRow, SiPrefixRow};
-use crate::PredicatesState;
+use crate::{FieldFiltersState, PredicatesState};
 
 #[component]
 pub fn ParametricFilter() -> impl IntoView {
     let predicates = expect_context::<PredicatesState>().0;
-    let collapsed = RwSignal::new(predicates.get_untracked().is_empty());
+    let field_filters = expect_context::<FieldFiltersState>().0;
+    // Default-collapsed when nothing is set; expanded when there's any
+    // active filter to surface why the grid is filtered.
+    let any_active = move || {
+        !predicates.with(|v| v.is_empty())
+            || field_filters.with(|f| {
+                f.stock_mode.is_some()
+                    || f.distributor_id.is_some()
+                    || f.price_min.is_some()
+                    || f.price_max.is_some()
+                    || f.created_after.is_some()
+                    || f.recurse_categories == Some(false)
+            })
+    };
+    let collapsed = RwSignal::new(!any_active());
 
     // Names + SI prefixes are loaded once. Both are small (<200 rows
     // each) and effectively immutable during a session.
     let names = LocalResource::new(|| api::fetch_parameter_names());
     let prefixes = LocalResource::new(|| api::fetch_si_prefixes_rich());
+    let distributors = LocalResource::new(|| api::fetch_distributors());
 
     let on_add = move |_| {
         predicates.update(|v| {
@@ -41,7 +56,22 @@ pub fn ParametricFilter() -> impl IntoView {
         });
         collapsed.set(false);
     };
-    let on_clear = move |_| predicates.set(Vec::new());
+    let on_clear_all = move |_| {
+        predicates.set(Vec::new());
+        field_filters.set(FieldFilters::default());
+    };
+    let active_count = move || {
+        let preds = predicates.with(|v| v.len());
+        let fields = field_filters.with(|f| {
+            (f.stock_mode.is_some() as usize)
+                + (f.distributor_id.is_some() as usize)
+                + (f.price_min.is_some() as usize)
+                + (f.price_max.is_some() as usize)
+                + (f.created_after.is_some() as usize)
+                + (if f.recurse_categories == Some(false) { 1 } else { 0 })
+        });
+        preds + fields
+    };
 
     view! {
         <div class="parametric-filter">
@@ -51,17 +81,24 @@ pub fn ParametricFilter() -> impl IntoView {
                     {move || if collapsed.get() { "▶" } else { "▼" }}
                     " Filters"
                     {move || {
-                        let n = predicates.with(|v| v.len());
+                        let n = active_count();
                         if n == 0 { String::new() } else { format!(" ({n})") }
                     }}
                 </button>
                 <div class="spacer"/>
-                <button class="btn-success btn-attach" on:click=on_add>"+ Add filter"</button>
-                <Show when=move || !predicates.with(|v| v.is_empty())>
-                    <button class="btn-secondary" on:click=on_clear>"Clear all"</button>
+                <Show when=move || any_active()>
+                    <button class="btn-secondary" on:click=on_clear_all>"Clear all"</button>
                 </Show>
             </div>
             <Show when=move || !collapsed.get()>
+                // ----- By-field section (slice 6a) -----
+                <FieldFilterRow distributors=distributors/>
+                // ----- By-parameter section (slice 11b) -----
+                <div class="filter-section-head">
+                    <span class="filter-section-label">"By parameter"</span>
+                    <div class="spacer"/>
+                    <button class="btn-success btn-attach" on:click=on_add>"+ Add filter"</button>
+                </div>
                 <Suspense fallback=|| view! {
                     <p class="muted" style:padding="6px 0">"Loading parameter names…"</p>
                 }>
@@ -91,6 +128,136 @@ pub fn ParametricFilter() -> impl IntoView {
                     }}
                 </Suspense>
             </Show>
+        </div>
+    }
+}
+
+#[component]
+fn FieldFilterRow(
+    distributors: LocalResource<Result<Vec<LookupOption>, api::ApiError>>,
+) -> impl IntoView {
+    let field_filters = expect_context::<FieldFiltersState>().0;
+
+    // Stock-mode 4-way pill.
+    let mode_btn = move |mode: Option<&'static str>, label: &'static str| -> AnyView {
+        let mode_for_active = mode.map(|s| s.to_string());
+        let mode_for_click = mode.map(|s| s.to_string());
+        let active = move || field_filters.with(|f| f.stock_mode == mode_for_active);
+        view! {
+            <button class="meta-filter-btn"
+                class:active=active
+                on:click=move |_| {
+                    let m = mode_for_click.clone();
+                    field_filters.update(|f| f.stock_mode = m);
+                }>{label}</button>
+        }.into_any()
+    };
+
+    // Recurse checkbox — a `Some(false)` value means "no recursion";
+    // `None` (default) keeps recursion on. Toggle flips between the two.
+    let recurse_off = move || field_filters.with(|f| f.recurse_categories == Some(false));
+    let on_recurse_toggle = move |ev: leptos::ev::Event| {
+        use wasm_bindgen::JsCast;
+        let checked = ev.target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+            .map(|e| e.checked()).unwrap_or(true);
+        field_filters.update(|f| {
+            // Checkbox visible to user is "Include subcategories" — checked
+            // = recurse (default), unchecked = exact match.
+            f.recurse_categories = if checked { None } else { Some(false) };
+        });
+    };
+
+    let dist_id = move || field_filters.with(|f| f.distributor_id);
+    let on_distributor_change = move |ev: leptos::ev::Event| {
+        use wasm_bindgen::JsCast;
+        let raw = ev.target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
+            .map(|e| e.value()).unwrap_or_default();
+        let new_id: Option<i32> = if raw.is_empty() { None } else { raw.parse().ok() };
+        field_filters.update(|f| f.distributor_id = new_id);
+    };
+
+    let price_min = move || field_filters.with(|f| f.price_min.clone()).unwrap_or_default();
+    let on_price_min = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        field_filters.update(|f| {
+            f.price_min = if v.trim().is_empty() { None } else { Some(v) };
+        });
+    };
+    let price_max = move || field_filters.with(|f| f.price_max.clone()).unwrap_or_default();
+    let on_price_max = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        field_filters.update(|f| {
+            f.price_max = if v.trim().is_empty() { None } else { Some(v) };
+        });
+    };
+
+    let created_after = move || field_filters.with(|f| f.created_after.clone()).unwrap_or_default();
+    let on_created_after = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        field_filters.update(|f| {
+            f.created_after = if v.trim().is_empty() { None } else { Some(v) };
+        });
+    };
+
+    view! {
+        <div class="filter-section-head">
+            <span class="filter-section-label">"By field"</span>
+        </div>
+        <div class="field-filter-grid">
+            <div class="field-filter-cell">
+                <label class="field-filter-label">"Stock"</label>
+                <div class="meta-filter">
+                    {mode_btn(None, "Any")}
+                    {mode_btn(Some("in_stock"), "In")}
+                    {mode_btn(Some("out_of_stock"), "Out")}
+                    {mode_btn(Some("low_stock"), "Low")}
+                </div>
+            </div>
+            <div class="field-filter-cell">
+                <label class="field-filter-label">"Distributor"</label>
+                <select prop:value=move || dist_id().map(|n| n.to_string()).unwrap_or_default()
+                    on:change=on_distributor_change>
+                    <option value="">"(any)"</option>
+                    <Suspense fallback=|| ()>
+                        {move || distributors.get().map(|res| match &*res {
+                            Err(_) => ().into_any(),
+                            Ok(rows) => {
+                                let opts = rows.clone();
+                                view! {
+                                    {opts.into_iter().map(|d| view! {
+                                        <option value=d.id.to_string()>{d.name}</option>
+                                    }).collect::<Vec<_>>()}
+                                }.into_any()
+                            }
+                        })}
+                    </Suspense>
+                </select>
+            </div>
+            <div class="field-filter-cell">
+                <label class="field-filter-label">"Price ≥"</label>
+                <input type="text" placeholder="0.00"
+                    prop:value=price_min on:input=on_price_min/>
+            </div>
+            <div class="field-filter-cell">
+                <label class="field-filter-label">"Price ≤"</label>
+                <input type="text" placeholder="0.00"
+                    prop:value=price_max on:input=on_price_max/>
+            </div>
+            <div class="field-filter-cell">
+                <label class="field-filter-label">"Created after"</label>
+                <input type="date"
+                    prop:value=created_after on:input=on_created_after/>
+            </div>
+            <div class="field-filter-cell field-filter-checkbox">
+                <label>
+                    <input type="checkbox"
+                        prop:checked=move || !recurse_off()
+                        on:change=on_recurse_toggle/>
+                    " Include subcategories"
+                </label>
+            </div>
         </div>
     }
 }

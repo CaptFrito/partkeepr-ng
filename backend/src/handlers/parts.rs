@@ -124,6 +124,29 @@ pub struct ListQuery {
     /// `None` = both real and meta parts (default), `Some(true)` = only
     /// meta-parts, `Some(false)` = only real parts.
     pub meta_only: Option<bool>,
+    /// Slice 6a — by-field filters (all optional; absent = no filter).
+    /// Stock mode: "in_stock" → stockLevel > 0; "out_of_stock" →
+    /// stockLevel <= 0; "low_stock" → lowStock = 1; anything else /
+    /// absent → no clause.
+    pub stock_mode: Option<String>,
+    pub distributor_id: Option<i32>,
+    pub price_min: Option<Decimal>,
+    pub price_max: Option<Decimal>,
+    /// ISO date (YYYY-MM-DD); filters parts created on or after this.
+    pub created_after: Option<chrono::NaiveDate>,
+    /// When category is set: `true` (default) = include subcategories
+    /// via lft/rgt; `false` = exact category match.
+    pub recurse_categories: Option<bool>,
+    /// Slice 6b — per-column inline LIKE/range filters. Independent
+    /// from `search` (which OR-LIKEs across name/description/IPN);
+    /// these target one column each. AND-combined with everything else.
+    pub name_like: Option<String>,
+    pub description_like: Option<String>,
+    pub internal_part_number_like: Option<String>,
+    pub stock_min: Option<i32>,
+    pub stock_max: Option<i32>,
+    pub status_like: Option<String>,
+    pub condition_like: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
     /// Sort column. One of: id, name, description, stock_level,
@@ -160,11 +183,18 @@ pub async fn list(
     let limit = q.limit.unwrap_or(50).min(200);
     let offset = q.offset.unwrap_or(0);
 
+    // Subcategory recursion is on by default. When the operator turns
+    // it off (slice 6a), we drop the lft/rgt JOIN and switch to an
+    // exact category-id match — much cheaper, and the semantics differ
+    // visibly in the grid (you see only direct children, not
+    // grandchildren).
+    let recurse = q.recurse_categories.unwrap_or(true);
+    let need_cat_recurse_join = q.category.is_some() && recurse;
     // The SELECT always LEFT-JOINs PartCategory so we can return
     // category_path on every row; the frontend groups by it.
-    // For category-filter, we additionally JOIN against the requested
-    // category and keep only descendants via lft/rgt containment.
-    let from_join_select = if q.category.is_some() {
+    // For category-filter w/ recursion, we additionally JOIN against
+    // the requested category and keep only descendants via lft/rgt.
+    let from_join_select = if need_cat_recurse_join {
         "FROM Part p \
          LEFT JOIN PartCategory cp ON cp.id = p.category_id \
          JOIN PartCategory cf ON cf.id = ?"
@@ -174,7 +204,7 @@ pub async fn list(
     };
     // The COUNT query doesn't need the path JOIN, but it does need the
     // descendant-filter JOIN so the count matches the SELECT.
-    let from_join_count = if q.category.is_some() {
+    let from_join_count = if need_cat_recurse_join {
         "FROM Part p \
          JOIN PartCategory cp ON cp.id = p.category_id \
          JOIN PartCategory cf ON cf.id = ?"
@@ -183,8 +213,12 @@ pub async fn list(
     };
 
     let mut where_clauses: Vec<&str> = Vec::new();
-    if q.category.is_some() {
+    if need_cat_recurse_join {
         where_clauses.push("cp.lft >= cf.lft AND cp.rgt <= cf.rgt");
+    } else if q.category.is_some() {
+        // Exact-match (no recursion) — bind the category id directly
+        // to the WHERE rather than joining a second time.
+        where_clauses.push("p.category_id = ?");
     }
     if q.storage_location.is_some() {
         where_clauses.push("p.storageLocation_id = ?");
@@ -223,6 +257,56 @@ pub async fn list(
             where_clauses.push("(p.metaPart = 0 OR p.metaPart IS NULL)");
         }
     }
+    // Slice 6a — by-field filters.
+    match q.stock_mode.as_deref() {
+        Some("in_stock") => where_clauses.push("p.stockLevel > 0"),
+        Some("out_of_stock") => where_clauses.push("p.stockLevel <= 0"),
+        Some("low_stock") => where_clauses.push("p.lowStock = 1"),
+        _ => {} // "any" or unset → no clause
+    }
+    if q.distributor_id.is_some() {
+        where_clauses.push(
+            "EXISTS (SELECT 1 FROM PartDistributor pd \
+             WHERE pd.part_id = p.id AND pd.distributor_id = ?)",
+        );
+    }
+    if q.price_min.is_some() {
+        where_clauses.push("p.averagePrice >= ?");
+    }
+    if q.price_max.is_some() {
+        where_clauses.push("p.averagePrice <= ?");
+    }
+    if q.created_after.is_some() {
+        // Reject MariaDB's zero-datetime explicitly — comparing it to
+        // a real date is undefined-ish (depends on sql_mode) and we
+        // don't want zero-date legacy rows to leak through a
+        // "created after 2020" query.
+        where_clauses.push(
+            "p.createDate >= ? AND p.createDate != '0000-00-00 00:00:00'",
+        );
+    }
+    // Slice 6b — per-column inline filters.
+    if q.name_like.is_some() {
+        where_clauses.push("p.name LIKE ?");
+    }
+    if q.description_like.is_some() {
+        where_clauses.push("p.description LIKE ?");
+    }
+    if q.internal_part_number_like.is_some() {
+        where_clauses.push("p.internalPartNumber LIKE ?");
+    }
+    if q.stock_min.is_some() {
+        where_clauses.push("p.stockLevel >= ?");
+    }
+    if q.stock_max.is_some() {
+        where_clauses.push("p.stockLevel <= ?");
+    }
+    if q.status_like.is_some() {
+        where_clauses.push("p.status LIKE ?");
+    }
+    if q.condition_like.is_some() {
+        where_clauses.push("p.partCondition LIKE ?");
+    }
     let where_part = if where_clauses.is_empty() {
         String::new()
     } else {
@@ -256,6 +340,9 @@ pub async fn list(
     let mut sel = sqlx::query_as::<_, PartRow>(&select_sql);
     let mut cnt = sqlx::query_scalar::<_, i64>(&count_sql);
     if let Some(cat) = q.category {
+        // Bind once for the JOIN-or-WHERE category placeholder. With
+        // recursion on, this binds cf.id in the JOIN; with recursion
+        // off, it binds the WHERE p.category_id = ? clause.
         sel = sel.bind(cat);
         cnt = cnt.bind(cat);
     }
@@ -279,6 +366,50 @@ pub async fn list(
         let pat = format!("%{s}%");
         sel = sel.bind(pat.clone()).bind(pat.clone()).bind(pat.clone());
         cnt = cnt.bind(pat.clone()).bind(pat.clone()).bind(pat);
+    }
+    // Slice 6a binds, in the same order the WHERE clauses were appended.
+    if let Some(did) = q.distributor_id {
+        sel = sel.bind(did);
+        cnt = cnt.bind(did);
+    }
+    if let Some(pmin) = q.price_min {
+        sel = sel.bind(pmin);
+        cnt = cnt.bind(pmin);
+    }
+    if let Some(pmax) = q.price_max {
+        sel = sel.bind(pmax);
+        cnt = cnt.bind(pmax);
+    }
+    if let Some(date) = q.created_after {
+        sel = sel.bind(date);
+        cnt = cnt.bind(date);
+    }
+    // Slice 6b binds, in WHERE-clause append order.
+    if let Some(s) = q.name_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = q.description_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = q.internal_part_number_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(n) = q.stock_min {
+        sel = sel.bind(n); cnt = cnt.bind(n);
+    }
+    if let Some(n) = q.stock_max {
+        sel = sel.bind(n); cnt = cnt.bind(n);
+    }
+    if let Some(s) = q.status_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = q.condition_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
     }
     sel = sel.bind(limit as i64).bind(offset as i64);
 

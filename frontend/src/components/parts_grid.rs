@@ -4,9 +4,10 @@ use crate::api;
 use crate::components::ParametricFilter;
 use crate::types::{CategoryNode, FootprintTreeNode, PartRow, StorageTreeNode};
 use crate::{
-    DataVersion, EditorMode, EditorModeState, FootprintSelection, LeftPaneMode,
-    LeftPaneModeState, MetaFilter, MetaFilterState, Offset, PredicatesState, Search,
-    SelectedCategory, SelectedFootprint, SelectedPart, SelectedStorage, Sort, StorageSelection,
+    DataVersion, EditorMode, EditorModeState, FieldFiltersState, FootprintSelection,
+    LeftPaneMode, LeftPaneModeState, MetaFilter, MetaFilterState, Offset, PredicatesState,
+    Search, SelectedCategory, SelectedFootprint, SelectedPart, SelectedStorage, Sort,
+    StorageSelection,
 };
 
 const PAGE_SIZE: u32 = 50;
@@ -25,6 +26,7 @@ pub fn PartsGrid() -> impl IntoView {
     let editor_mode = expect_context::<EditorModeState>().0;
     let predicates = expect_context::<PredicatesState>().0;
     let meta_filter = expect_context::<MetaFilterState>().0;
+    let field_filters = expect_context::<FieldFiltersState>().0;
 
     /// (category, storage_folder, storage_location, footprint_folder, footprint).
     /// Mode-sensitive: only one tab's selection is "live" at a time.
@@ -49,18 +51,17 @@ pub fn PartsGrid() -> impl IntoView {
         }
     };
 
-    // Reset pagination when filter, search, sort, predicates, or
-    // meta-filter changes.
-    Effect::new(move |prev: Option<(Filter, String, (String, bool), usize, MetaFilter)>| {
-        // Predicate count is good enough as a change-detector for the
-        // pagination-reset; the actual fetch dependency tracks the full
-        // predicate state via `predicates.with`.
+    // Reset pagination when any of the filter axes change. Predicate
+    // count is good enough as a change-detector; the actual fetch
+    // dependency tracks the full predicate state via `predicates.with`.
+    Effect::new(move |prev: Option<(Filter, String, (String, bool), usize, MetaFilter, api::FieldFilters)>| {
         let cur = (
             active_filter(),
             search.get(),
             sort.get(),
             predicates.with(|v| v.len()),
             meta_filter.get(),
+            field_filters.get(),
         );
         if let Some(p) = prev.as_ref() {
             if *p != cur {
@@ -89,11 +90,12 @@ pub fn PartsGrid() -> impl IntoView {
             v.iter().filter(|p| !p.name.is_empty()).cloned().collect()
         });
         let meta_only = meta_filter.get().to_meta_only();
+        let fields = field_filters.get();
         async move {
             if preds.is_empty() {
                 api::fetch_parts(
                     cat, storage_folder, storage_location, footprint_folder, footprint,
-                    s, PAGE_SIZE, off, sort_opt, dir_opt, meta_only,
+                    s, PAGE_SIZE, off, sort_opt, dir_opt, meta_only, &fields,
                 ).await
             } else {
                 let body = api::ParametricBody {
@@ -105,6 +107,19 @@ pub fn PartsGrid() -> impl IntoView {
                     footprint,
                     search: if s.is_empty() { None } else { Some(s) },
                     meta_only,
+                    stock_mode: fields.stock_mode.clone(),
+                    distributor_id: fields.distributor_id,
+                    price_min: fields.price_min.clone(),
+                    price_max: fields.price_max.clone(),
+                    created_after: fields.created_after.clone(),
+                    recurse_categories: fields.recurse_categories,
+                    name_like: fields.name_like.clone(),
+                    description_like: fields.description_like.clone(),
+                    internal_part_number_like: fields.internal_part_number_like.clone(),
+                    stock_min: fields.stock_min,
+                    stock_max: fields.stock_max,
+                    status_like: fields.status_like.clone(),
+                    condition_like: fields.condition_like.clone(),
                     limit: PAGE_SIZE,
                     offset: off,
                     sort: sort_opt,
@@ -267,20 +282,52 @@ pub fn PartsGrid() -> impl IntoView {
         </Show>
         <ParametricFilter/>
         <div class="parts-grid">
-            <Suspense fallback=|| view! { <p class="muted" style="padding:12px">"Loading…"</p> }>
-                {move || parts.get().map(|res| match &*res {
-                    Err(e) => view! { <p class="muted" style="padding:12px">{format!("Error: {}", e.0)}</p> }.into_any(),
-                    Ok(r) => view! {
-                        <GroupedParts items=r.items.clone() />
-                    }.into_any(),
-                })}
-            </Suspense>
+            // Single static table — thead (column titles + per-column
+            // filter row) lives outside the Suspense so the filter
+            // <input> elements stay mounted across data refetches.
+            // Without this, every keystroke fires a refetch, recreates
+            // the table, and unmounts/remounts the filter inputs (focus
+            // loss after every character).
+            <table class="parts">
+                <thead>
+                    <tr>
+                        <SortableTh label="#" col="id" width="60px" align_right=true />
+                        <SortableTh label="Name" col="name" width="" />
+                        <SortableTh label="Description" col="description" width="" />
+                        <SortableTh label="Stock" col="stock_level" width="60px" align_right=true />
+                        <SortableTh label="Min" col="min_stock_level" width="50px" align_right=true />
+                        <SortableTh label="Status" col="status" width="80px" />
+                        <SortableTh label="Condition" col="part_condition" width="80px" />
+                        <SortableTh label="Avg Price" col="average_price" width="80px" align_right=true />
+                    </tr>
+                    <ColumnFilterRow/>
+                </thead>
+                <Suspense fallback=|| view! {
+                    <tbody><tr><td colspan="8" class="muted" style="padding:12px">"Loading…"</td></tr></tbody>
+                }>
+                    {move || parts.get().map(|res| match &*res {
+                        Err(e) => view! {
+                            <tbody><tr><td colspan="8" class="muted" style="padding:12px">
+                                {format!("Error: {}", e.0)}
+                            </td></tr></tbody>
+                        }.into_any(),
+                        Ok(r) => view! {
+                            <GroupedTbodies items=r.items.clone() />
+                        }.into_any(),
+                    })}
+                </Suspense>
+            </table>
         </div>
     }
 }
 
 #[component]
-fn GroupedParts(items: Vec<PartRow>) -> impl IntoView {
+fn GroupedTbodies(items: Vec<PartRow>) -> impl IntoView {
+    // Group consecutive items by their category breadcrumb so we can
+    // emit one <tbody> per category. Each <tbody> is preceded by a
+    // section-header row (<tr> with colspan) instead of a separate
+    // <div> — keeps everything inside one <table> so the column-filter
+    // <input>s stay mounted across data refetches.
     let mut groups: Vec<(String, Vec<PartRow>)> = Vec::new();
     for item in items {
         let path = item.category_path.clone().unwrap_or_else(|| "(uncategorized)".into());
@@ -291,35 +338,23 @@ fn GroupedParts(items: Vec<PartRow>) -> impl IntoView {
     }
 
     view! {
-        {groups.into_iter().map(|(path, items)| view! {
-            <CategorySection path=path items=items/>
+        {groups.into_iter().map(|(path, items)| {
+            let count = items.len();
+            view! {
+                <tbody class="category-tbody">
+                    <tr class="section-header-row">
+                        <td colspan="8">
+                            {path}
+                            <span class="count">{format!(
+                                "  ({count} part{})",
+                                if count == 1 { "" } else { "s" },
+                            )}</span>
+                        </td>
+                    </tr>
+                    {items.into_iter().map(|p| view! { <PartRowView p=p/> }).collect::<Vec<_>>()}
+                </tbody>
+            }
         }).collect::<Vec<_>>()}
-    }
-}
-
-#[component]
-fn CategorySection(path: String, items: Vec<PartRow>) -> impl IntoView {
-    let count = items.len();
-    view! {
-        <div class="section-header">
-            {path}
-            <span class="count">{format!("  ({count} part{})", if count == 1 { "" } else { "s" })}</span>
-        </div>
-        <table class="parts">
-            <thead><tr>
-                <SortableTh label="#" col="id" width="60px" align_right=true />
-                <SortableTh label="Name" col="name" width="" />
-                <SortableTh label="Description" col="description" width="" />
-                <SortableTh label="Stock" col="stock_level" width="60px" align_right=true />
-                <SortableTh label="Min" col="min_stock_level" width="50px" align_right=true />
-                <SortableTh label="Status" col="status" width="80px" />
-                <SortableTh label="Condition" col="part_condition" width="80px" />
-                <SortableTh label="Avg Price" col="average_price" width="80px" align_right=true />
-            </tr></thead>
-            <tbody>
-                {items.into_iter().map(|p| view! { <PartRowView p=p/> }).collect::<Vec<_>>()}
-            </tbody>
-        </table>
     }
 }
 
@@ -364,6 +399,87 @@ fn SortableTh(
             }>
             {label}<span class=arrow_cls>{arrow_text}</span>
         </th>
+    }
+}
+
+/// Slice 6b — second header row with one inline filter input per
+/// filterable column. Reads/writes the shared `FieldFiltersState`, so
+/// inline filters and the filter pane stay in sync (where they share
+/// fields, e.g. nothing — the pane has no name/description/IPN inputs).
+#[component]
+fn ColumnFilterRow() -> impl IntoView {
+    let fields = expect_context::<FieldFiltersState>().0;
+
+    // Generic LIKE-input cell.
+    let like_cell = move |get: fn(&api::FieldFilters) -> Option<String>,
+                          set: fn(&mut api::FieldFilters, Option<String>)| -> AnyView {
+        let value = move || fields.with(|f| get(f)).unwrap_or_default();
+        let on_input = move |ev: leptos::ev::Event| {
+            let v = event_target_value(&ev);
+            fields.update(|f| {
+                set(f, if v.trim().is_empty() { None } else { Some(v) });
+            });
+        };
+        view! {
+            <th class="col-filter">
+                <input type="text" placeholder="filter…"
+                    prop:value=value on:input=on_input/>
+            </th>
+        }.into_any()
+    };
+
+    // Stock min/max range cell. Two tiny inputs side by side under one <th>.
+    let stock_min_value = move || fields.with(|f| f.stock_min).map(|n| n.to_string()).unwrap_or_default();
+    let stock_max_value = move || fields.with(|f| f.stock_max).map(|n| n.to_string()).unwrap_or_default();
+    let on_stock_min = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        fields.update(|f| {
+            f.stock_min = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
+        });
+    };
+    let on_stock_max = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        fields.update(|f| {
+            f.stock_max = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
+        });
+    };
+
+    view! {
+        <tr class="col-filter-row">
+            // # column — no filter (filtering by id is rarely useful).
+            <th class="col-filter"></th>
+            {like_cell(
+                |f| f.name_like.clone(),
+                |f, v| f.name_like = v,
+            )}
+            {like_cell(
+                |f| f.description_like.clone(),
+                |f, v| f.description_like = v,
+            )}
+            <th class="col-filter">
+                <span class="col-filter-range">
+                    <input type="number" min="0" placeholder="min"
+                        prop:value=stock_min_value on:input=on_stock_min/>
+                    <input type="number" min="0" placeholder="max"
+                        prop:value=stock_max_value on:input=on_stock_max/>
+                </span>
+            </th>
+            // Min column — no per-column filter (the "Stock = Low" pill
+            // in the side panel does what most operators want here).
+            <th class="col-filter"></th>
+            {like_cell(
+                |f| f.status_like.clone(),
+                |f, v| f.status_like = v,
+            )}
+            {like_cell(
+                |f| f.condition_like.clone(),
+                |f, v| f.condition_like = v,
+            )}
+            // Avg Price — the side panel's price-range inputs cover
+            // this column. Skip the inline duplicate to avoid two
+            // surfaces editing the same fields.
+            <th class="col-filter"></th>
+        </tr>
     }
 }
 

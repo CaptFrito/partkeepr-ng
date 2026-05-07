@@ -436,6 +436,7 @@ fn AllocationRow(
                 30, 0,
                 None, None,
                 None,
+                &api::FieldFilters::default(),
             ).await
         }
     });

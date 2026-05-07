@@ -250,6 +250,7 @@ fn PartPicker(
                 50, 0,
                 None, None,
                 None,
+                &api::FieldFilters::default(),
             ).await
         }
     });

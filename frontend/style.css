@@ -1398,3 +1398,103 @@ table.sub.edit td { padding: 3px 4px; }
     cursor: pointer;
 }
 .run-picker-toggle input[type="checkbox"] { margin-right: 4px; }
+
+/* ----------------------------------------------------------------------- */
+/* Slice 6a: by-field filter section inside the filter pane                */
+/* ----------------------------------------------------------------------- */
+
+.filter-section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 4px 0;
+    padding-bottom: 2px;
+    border-bottom: 1px dashed #d1d5db;
+}
+.filter-section-head .spacer { flex: 1; }
+.filter-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6b7280;
+}
+.field-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px 12px;
+    padding: 4px 0;
+}
+.field-filter-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.field-filter-label {
+    font-size: 11px;
+    color: #4b5563;
+}
+.field-filter-cell input[type="text"],
+.field-filter-cell input[type="date"],
+.field-filter-cell select {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 12px;
+}
+.field-filter-cell .meta-filter { margin-left: 0; }
+.field-filter-checkbox {
+    flex-direction: row;
+    align-items: center;
+    padding-top: 14px;
+}
+.field-filter-checkbox label {
+    font-size: 12px;
+    color: #1f2937;
+    cursor: pointer;
+}
+.field-filter-checkbox input[type="checkbox"] { margin-right: 4px; }
+
+/* ----------------------------------------------------------------------- */
+/* Slice 6b: per-column inline filters                                     */
+/* ----------------------------------------------------------------------- */
+
+table.parts thead tr.col-filter-row th.col-filter {
+    padding: 2px 4px;
+    background: #f3f4f6;
+    border-bottom: 1px solid #d1d5db;
+    text-align: left;
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: 0;
+}
+table.parts thead tr.col-filter-row input[type="text"],
+table.parts thead tr.col-filter-row input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 11px;
+    padding: 2px 4px;
+    color: #1f2937;
+}
+.col-filter-range {
+    display: flex;
+    gap: 2px;
+}
+.col-filter-range input { width: 50%; }
+
+/* Slice 6b restructure: section headers as table rows (single-table
+   layout so the column-filter <input>s in <thead> stay mounted across
+   data refetches). Mirrors the look of the old .section-header <div>. */
+table.parts tr.section-header-row > td {
+    background: #f9fafb;
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+}
+table.parts tr.section-header-row > td .count {
+    color: #9ca3af;
+    font-weight: 400;
+}

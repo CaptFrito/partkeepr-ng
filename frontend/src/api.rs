@@ -45,6 +45,7 @@ pub async fn fetch_parts(
     sort: Option<String>,
     dir: Option<String>,
     meta_only: Option<bool>,
+    fields: &FieldFilters,
 ) -> Result<PartListResponse, ApiError> {
     let mut url = format!("{API_BASE}/api/parts?limit={limit}&offset={offset}");
     if let Some(c) = category {
@@ -75,7 +76,76 @@ pub async fn fetch_parts(
     if let Some(m) = meta_only {
         url.push_str(&format!("&meta_only={m}"));
     }
+    // Slice 6a — by-field filters.
+    if let Some(s) = &fields.stock_mode {
+        url.push_str(&format!("&stock_mode={s}"));
+    }
+    if let Some(d) = fields.distributor_id {
+        url.push_str(&format!("&distributor_id={d}"));
+    }
+    if let Some(p) = &fields.price_min {
+        url.push_str(&format!("&price_min={}", urlencode(p)));
+    }
+    if let Some(p) = &fields.price_max {
+        url.push_str(&format!("&price_max={}", urlencode(p)));
+    }
+    if let Some(d) = &fields.created_after {
+        url.push_str(&format!("&created_after={}", urlencode(d)));
+    }
+    if let Some(r) = fields.recurse_categories {
+        url.push_str(&format!("&recurse_categories={r}"));
+    }
+    if let Some(s) = &fields.name_like {
+        url.push_str(&format!("&name_like={}", urlencode(s)));
+    }
+    if let Some(s) = &fields.description_like {
+        url.push_str(&format!("&description_like={}", urlencode(s)));
+    }
+    if let Some(s) = &fields.internal_part_number_like {
+        url.push_str(&format!("&internal_part_number_like={}", urlencode(s)));
+    }
+    if let Some(n) = fields.stock_min {
+        url.push_str(&format!("&stock_min={n}"));
+    }
+    if let Some(n) = fields.stock_max {
+        url.push_str(&format!("&stock_max={n}"));
+    }
+    if let Some(s) = &fields.status_like {
+        url.push_str(&format!("&status_like={}", urlencode(s)));
+    }
+    if let Some(s) = &fields.condition_like {
+        url.push_str(&format!("&condition_like={}", urlencode(s)));
+    }
     Ok(Request::get(&url).send().await?.json().await?)
+}
+
+/// Slice 6a — by-field filter knobs that ride alongside the parametric
+/// predicates and the basic search/category/etc. set. All optional —
+/// `None` everywhere = no filter clause added.
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize, PartialEq)]
+pub struct FieldFilters {
+    /// "in_stock" | "out_of_stock" | "low_stock" — anything else /
+    /// `None` = "any" (no clause).
+    pub stock_mode: Option<String>,
+    pub distributor_id: Option<i32>,
+    /// Decimal serialised as a string for wire convenience (matches
+    /// existing PartDistributor.price handling).
+    pub price_min: Option<String>,
+    pub price_max: Option<String>,
+    /// ISO date "YYYY-MM-DD".
+    pub created_after: Option<String>,
+    /// `None` (default true) or `Some(false)` (exact-match category).
+    pub recurse_categories: Option<bool>,
+    /// Slice 6b — per-column inline filters. Independent from
+    /// `search` (which OR-LIKEs across name/description/IPN); these
+    /// each target a single column. AND-combined with everything else.
+    pub name_like: Option<String>,
+    pub description_like: Option<String>,
+    pub internal_part_number_like: Option<String>,
+    pub stock_min: Option<i32>,
+    pub stock_max: Option<i32>,
+    pub status_like: Option<String>,
+    pub condition_like: Option<String>,
 }
 
 pub async fn fetch_part_detail(id: i32) -> Result<PartDetail, ApiError> {
@@ -1269,6 +1339,34 @@ pub struct ParametricBody {
     pub search: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_only: Option<bool>,
+    // Slice 6a — by-field filters; mirror FieldFilters' shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distributor_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_min: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_max: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_after: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurse_categories: Option<bool>,
+    // Slice 6b — per-column inline filters; mirror FieldFilters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_like: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_like: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub internal_part_number_like: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_min: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_max: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_like: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_like: Option<String>,
     pub limit: u32,
     pub offset: u32,
     #[serde(skip_serializing_if = "Option::is_none")]

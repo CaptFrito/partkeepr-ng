@@ -170,6 +170,11 @@ impl MetaFilter {
 
 #[derive(Clone, Copy)]
 pub struct MetaFilterState(pub RwSignal<MetaFilter>);
+
+/// Slice 6a — by-field filters, sibling to the parametric predicates
+/// and the existing search / category / etc. set.
+#[derive(Clone, Copy)]
+pub struct FieldFiltersState(pub RwSignal<api::FieldFilters>);
 /// Open stock-entry dialog. None when closed.
 #[derive(Clone, Copy)]
 pub struct StockDialogState(pub RwSignal<Option<StockDialogCtx>>);
@@ -608,6 +613,7 @@ fn App() -> impl IntoView {
     let run_delete = RunDeleteState(RwSignal::new(None));
     let predicates = PredicatesState(RwSignal::new(read_predicates_from_hash()));
     let meta_filter = MetaFilterState(RwSignal::new(MetaFilter::All));
+    let field_filters = FieldFiltersState(RwSignal::new(api::FieldFilters::default()));
 
     provide_context(selected_category);
     provide_context(selected_part);
@@ -643,6 +649,7 @@ fn App() -> impl IntoView {
     provide_context(run_delete);
     provide_context(predicates);
     provide_context(meta_filter);
+    provide_context(field_filters);
 
     // Push predicate changes into the URL hash so a filtered view is
     // shareable / reload-survivable. Reads happen once on mount above.

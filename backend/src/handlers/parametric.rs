@@ -191,6 +191,35 @@ pub struct ParametricBody {
     /// `/api/parts`. None = both, Some(true) = only meta, Some(false) = only real.
     #[serde(default)]
     pub meta_only: Option<bool>,
+    /// Slice 6a — by-field filters; mirrors `ListQuery`. See parts.rs
+    /// for semantics. `None` everywhere = no clause.
+    #[serde(default)]
+    pub stock_mode: Option<String>,
+    #[serde(default)]
+    pub distributor_id: Option<i32>,
+    #[serde(default)]
+    pub price_min: Option<rust_decimal::Decimal>,
+    #[serde(default)]
+    pub price_max: Option<rust_decimal::Decimal>,
+    #[serde(default)]
+    pub created_after: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub recurse_categories: Option<bool>,
+    /// Slice 6b — per-column inline filters; mirror ListQuery shape.
+    #[serde(default)]
+    pub name_like: Option<String>,
+    #[serde(default)]
+    pub description_like: Option<String>,
+    #[serde(default)]
+    pub internal_part_number_like: Option<String>,
+    #[serde(default)]
+    pub stock_min: Option<i32>,
+    #[serde(default)]
+    pub stock_max: Option<i32>,
+    #[serde(default)]
+    pub status_like: Option<String>,
+    #[serde(default)]
+    pub condition_like: Option<String>,
     #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
@@ -532,7 +561,9 @@ async fn run_parametric_search(
     }
 
     // Standard list-filter machinery (mirrors handlers::parts::list).
-    let from_join_select = if body.category.is_some() {
+    let recurse = body.recurse_categories.unwrap_or(true);
+    let need_cat_recurse_join = body.category.is_some() && recurse;
+    let from_join_select = if need_cat_recurse_join {
         "FROM Part p \
          LEFT JOIN PartCategory cp ON cp.id = p.category_id \
          JOIN PartCategory cf ON cf.id = ?"
@@ -540,7 +571,7 @@ async fn run_parametric_search(
         "FROM Part p \
          LEFT JOIN PartCategory cp ON cp.id = p.category_id"
     };
-    let from_join_count = if body.category.is_some() {
+    let from_join_count = if need_cat_recurse_join {
         "FROM Part p \
          JOIN PartCategory cp ON cp.id = p.category_id \
          JOIN PartCategory cf ON cf.id = ?"
@@ -549,8 +580,10 @@ async fn run_parametric_search(
     };
 
     let mut where_clauses: Vec<String> = Vec::new();
-    if body.category.is_some() {
+    if need_cat_recurse_join {
         where_clauses.push("cp.lft >= cf.lft AND cp.rgt <= cf.rgt".to_string());
+    } else if body.category.is_some() {
+        where_clauses.push("p.category_id = ?".to_string());
     }
     if body.storage_location.is_some() {
         where_clauses.push("p.storageLocation_id = ?".to_string());
@@ -588,6 +621,52 @@ async fn run_parametric_search(
         } else {
             "(p.metaPart = 0 OR p.metaPart IS NULL)".into()
         });
+    }
+    // Slice 6a — by-field filters.
+    match body.stock_mode.as_deref() {
+        Some("in_stock") => where_clauses.push("p.stockLevel > 0".into()),
+        Some("out_of_stock") => where_clauses.push("p.stockLevel <= 0".into()),
+        Some("low_stock") => where_clauses.push("p.lowStock = 1".into()),
+        _ => {}
+    }
+    if body.distributor_id.is_some() {
+        where_clauses.push(
+            "EXISTS (SELECT 1 FROM PartDistributor pd \
+             WHERE pd.part_id = p.id AND pd.distributor_id = ?)".into(),
+        );
+    }
+    if body.price_min.is_some() {
+        where_clauses.push("p.averagePrice >= ?".into());
+    }
+    if body.price_max.is_some() {
+        where_clauses.push("p.averagePrice <= ?".into());
+    }
+    if body.created_after.is_some() {
+        where_clauses.push(
+            "p.createDate >= ? AND p.createDate != '0000-00-00 00:00:00'".into(),
+        );
+    }
+    // Slice 6b — per-column inline filters.
+    if body.name_like.is_some() {
+        where_clauses.push("p.name LIKE ?".into());
+    }
+    if body.description_like.is_some() {
+        where_clauses.push("p.description LIKE ?".into());
+    }
+    if body.internal_part_number_like.is_some() {
+        where_clauses.push("p.internalPartNumber LIKE ?".into());
+    }
+    if body.stock_min.is_some() {
+        where_clauses.push("p.stockLevel >= ?".into());
+    }
+    if body.stock_max.is_some() {
+        where_clauses.push("p.stockLevel <= ?".into());
+    }
+    if body.status_like.is_some() {
+        where_clauses.push("p.status LIKE ?".into());
+    }
+    if body.condition_like.is_some() {
+        where_clauses.push("p.partCondition LIKE ?".into());
     }
     where_clauses.extend(pred_clauses.into_iter());
     let where_part = if where_clauses.is_empty() {
@@ -650,6 +729,50 @@ async fn run_parametric_search(
         let pat = format!("%{s}%");
         sel = sel.bind(pat.clone()).bind(pat.clone()).bind(pat.clone());
         cnt = cnt.bind(pat.clone()).bind(pat.clone()).bind(pat);
+    }
+    // Slice 6a binds (in WHERE-clause-append order).
+    if let Some(did) = body.distributor_id {
+        sel = sel.bind(did);
+        cnt = cnt.bind(did);
+    }
+    if let Some(pmin) = body.price_min {
+        sel = sel.bind(pmin);
+        cnt = cnt.bind(pmin);
+    }
+    if let Some(pmax) = body.price_max {
+        sel = sel.bind(pmax);
+        cnt = cnt.bind(pmax);
+    }
+    if let Some(date) = body.created_after {
+        sel = sel.bind(date);
+        cnt = cnt.bind(date);
+    }
+    // Slice 6b binds.
+    if let Some(s) = body.name_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = body.description_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = body.internal_part_number_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(n) = body.stock_min {
+        sel = sel.bind(n); cnt = cnt.bind(n);
+    }
+    if let Some(n) = body.stock_max {
+        sel = sel.bind(n); cnt = cnt.bind(n);
+    }
+    if let Some(s) = body.status_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
+    }
+    if let Some(s) = body.condition_like.as_deref() {
+        let pat = format!("%{s}%");
+        sel = sel.bind(pat.clone()); cnt = cnt.bind(pat);
     }
     for b in &pred_binds {
         match b {
