@@ -527,6 +527,11 @@
             if (!r.ok) throw new Error((data && data.error) || `print failed: ${r.status}`);
             return data;
         },
+        async printerInfo() {
+            const r = await fetch("/api/print/printer_info");
+            if (!r.ok) throw new Error(`printer info failed: ${r.status}`);
+            return r.json();
+        },
         async metaMatches(metaPartId) {
             const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
             if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
@@ -6783,17 +6788,20 @@
     /// to the printhead.
     const PT_DPI = 180;
 
-    /// Printable height in pixels per tape width, for PT-D series.
+    /// Printable height in pixels per tape width, for the PT-D410.
     /// These are the **actual printable** values ptouch-print
-    /// expects — not the geometric tape width times DPI. The unprint-
-    /// able margins along each long edge of the tape eat the rest.
-    /// (Confirmed against ptouch-print --info on a PT-D410: 6mm tape
-    /// reports `maximum printing width for this tape is 32px`.)
+    /// expects — not the geometric tape width × DPI. The unprintable
+    /// margins along each long edge of the tape eat the rest.
+    /// Confirmed via `ptouch-print --info` against the real device:
+    ///   6mm  → 32 px
+    ///   9mm  → 52 px
+    ///   12mm → 76 px
+    /// 3.5mm wasn't measured; geometric estimate of 24 px stands.
     const TAPE_PRINTABLE_PX = {
         3.5: 24,
         6:   32,
-        9:   50,
-        12:  70,
+        9:   52,
+        12:  76,
     };
 
     function tapeHeightPx(width_mm) {
@@ -7022,6 +7030,8 @@
                                               height: 24, borderless: true },
                                             { view: "template", id: "pk-label-preview", template: "",
                                               borderless: true, css: "pk-label-preview" },
+                                            { view: "template", id: "pk-label-tape-status",
+                                              template: "", height: 28, borderless: true, css: "pk-help-hint" },
                                         ],
                                     },
                                 ],
@@ -7086,6 +7096,28 @@
             qr: seedQr,
         });
         setTimeout(renderPreview, 0);
+
+        // Best-effort: ask the backend what tape is loaded right now,
+        // default the picker to match. If ptouch-print isn't
+        // configured or the printer is off, just leave the default.
+        if (printAvailable) {
+            api.printerInfo()
+                .then((info) => {
+                    const status = $$("pk-label-tape-status");
+                    if (info && info.current_tape_width_mm != null) {
+                        const w = String(info.current_tape_width_mm);
+                        // Webix richselect option ids are strings.
+                        $$("pk-label-form").setValues({ width_mm: w }, true);
+                        renderPreview();
+                        if (status) status.setHTML(
+                            `<span style="padding:4px 8px;color:#1e7e34">Loaded: <b>${escapeHtml(info.status || (w + " mm"))}</b></span>`
+                        );
+                    } else if (status && info && info.status) {
+                        status.setHTML(`<span style="padding:4px 8px;color:#b09a3e">⚠ ${escapeHtml(info.status)}</span>`);
+                    }
+                })
+                .catch((e) => console.warn("printerInfo failed:", e));
+        }
     }
 
     // ============================================================

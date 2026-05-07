@@ -77,6 +77,145 @@ pub async fn capabilities(
     })
 }
 
+/// Live info pulled from `ptouch-print --info`. Called just-in-time
+/// when the label dialog opens so the tape-width selector can
+/// default to whatever cassette is currently loaded. Best-effort:
+/// returns `{available: false}` if ptouch isn't configured or the
+/// printer is unreachable; never errors out the request.
+#[derive(Debug, Serialize)]
+pub struct PrinterInfoResponse {
+    pub available: bool,
+    /// Width of the currently loaded tape, in mm. None when not
+    /// known (printer off, ptouch error, etc.).
+    pub current_tape_width_mm: Option<f32>,
+    /// Max printable height for the loaded tape, in pixels. Same
+    /// availability rules as current_tape_width_mm.
+    pub current_max_print_height_px: Option<i32>,
+    /// Human-readable status message (the tape's media type +
+    /// color summary, etc.). Surfaced as a hint in the dialog.
+    pub status: Option<String>,
+}
+
+pub async fn printer_info(
+    State(cfg): State<PrintConfig>,
+) -> Json<PrinterInfoResponse> {
+    let bin = match cfg.ptouch_bin.as_ref() {
+        Some(b) => b,
+        None => {
+            return Json(PrinterInfoResponse {
+                available: false,
+                current_tape_width_mm: None,
+                current_max_print_height_px: None,
+                status: None,
+            });
+        }
+    };
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new(bin)
+            .arg("--info")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await;
+
+    let output = match result {
+        Ok(Ok(o)) if o.status.success() => o,
+        Ok(Ok(o)) => {
+            let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+            return Json(PrinterInfoResponse {
+                available: false,
+                current_tape_width_mm: None,
+                current_max_print_height_px: None,
+                status: Some(format!("ptouch-print --info failed: {stderr}").trim().to_string()),
+            });
+        }
+        Ok(Err(e)) => {
+            return Json(PrinterInfoResponse {
+                available: false,
+                current_tape_width_mm: None,
+                current_max_print_height_px: None,
+                status: Some(format!("ptouch-print spawn error: {e}")),
+            });
+        }
+        Err(_) => {
+            return Json(PrinterInfoResponse {
+                available: false,
+                current_tape_width_mm: None,
+                current_max_print_height_px: None,
+                status: Some("ptouch-print --info timed out (3s)".into()),
+            });
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let parsed = parse_ptouch_info(&stdout);
+    Json(PrinterInfoResponse {
+        available: parsed.is_some(),
+        current_tape_width_mm: parsed.as_ref().map(|p| p.tape_width_mm),
+        current_max_print_height_px: parsed.as_ref().map(|p| p.max_print_height_px),
+        status: parsed.map(|p| p.status_summary).or(Some(stdout)),
+    })
+}
+
+struct PtouchInfo {
+    tape_width_mm: f32,
+    max_print_height_px: i32,
+    status_summary: String,
+}
+
+/// Parse the few lines we care about out of `ptouch-print --info` output:
+///
+/// ```text
+/// PT-D410 found on USB bus 1, device 40
+/// printer has 180 dpi, maximum printing width is 128 px
+/// maximum printing width for this tape is 76px
+/// media type = 0x01 (Laminated tape)
+/// media width = 12 mm
+/// tape color = 0x01 (White)
+/// text color = 0x08 (Black)
+/// error = 0x0000
+/// ```
+fn parse_ptouch_info(output: &str) -> Option<PtouchInfo> {
+    let mut tape_mm: Option<f32> = None;
+    let mut max_px: Option<i32> = None;
+    let mut media_type: Option<String> = None;
+    let mut tape_color: Option<String> = None;
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("media width = ") {
+            tape_mm = rest.split_whitespace().next().and_then(|s| s.parse().ok());
+        } else if let Some(rest) = line.strip_prefix("maximum printing width for this tape is ") {
+            // Format: "76px" — trailing literal "px"
+            let n = rest.trim_end_matches("px").trim();
+            max_px = n.parse().ok();
+        } else if let Some(rest) = line.strip_prefix("media type = ") {
+            // "0x01 (Laminated tape)" — extract the parenthesized label
+            if let (Some(s), Some(e)) = (rest.find('('), rest.rfind(')')) {
+                media_type = Some(rest[s + 1..e].to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("tape color = ") {
+            if let (Some(s), Some(e)) = (rest.find('('), rest.rfind(')')) {
+                tape_color = Some(rest[s + 1..e].to_string());
+            }
+        }
+    }
+    let tape_width_mm = tape_mm?;
+    let max_print_height_px = max_px?;
+    let media = media_type.as_deref().unwrap_or("?");
+    let color = tape_color.as_deref().unwrap_or("?");
+    Some(PtouchInfo {
+        tape_width_mm,
+        max_print_height_px,
+        status_summary: format!(
+            "{tape_width_mm} mm {media}, {color}"
+        ),
+    })
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PrintLabelRequest {
     /// Base64-encoded PNG (no `data:image/png;base64,` prefix).

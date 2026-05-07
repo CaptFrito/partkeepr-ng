@@ -243,5 +243,6 @@ pub fn routes() -> Router<AppState> {
         )
         // Slice 13: label printing (capabilities + ptouch-print shell-out).
         .route("/api/print/capabilities", get(printing::capabilities))
+        .route("/api/print/printer_info", get(printing::printer_info))
         .route("/api/print/label", post(printing::print_label))
 }
