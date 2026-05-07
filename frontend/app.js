@@ -439,6 +439,16 @@
             const r = await fetch(url, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete run failed: ${r.status} ${await r.text()}`);
         },
+        async partProjects(partId) {
+            const r = await fetch(`/api/parts/${partId}/projects`);
+            if (!r.ok) throw new Error(`part-projects failed: ${r.status}`);
+            return r.json();
+        },
+        async partRuns(partId) {
+            const r = await fetch(`/api/parts/${partId}/runs`);
+            if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
+            return r.json();
+        },
     };
 
     // ============================================================
@@ -3790,18 +3800,45 @@
 
     async function loadPartDetail(id) {
         try {
-            const part = await api.part(id);
+            const [part, projects, runs] = await Promise.all([
+                api.part(id),
+                api.partProjects(id).catch(() => []),
+                api.partRuns(id).catch(() => []),
+            ]);
             currentPart = part;
-            $$("pk-detail").setHTML(renderPartDetailHtml(part));
+            $$("pk-detail").setHTML(renderPartDetailHtml(part, projects, runs));
             const actions = $$("pk-detail-actions");
             if (actions) actions.show();
+            // Wire up project links in the cross-cutting sections.
+            const root = $$("pk-detail").$view;
+            if (root) {
+                root.querySelectorAll('a[data-project-id]').forEach((a) => {
+                    a.addEventListener("click", (ev) => {
+                        ev.preventDefault();
+                        const pid = parseInt(a.dataset.projectId, 10);
+                        jumpToProject(pid);
+                    });
+                });
+            }
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Failed to load part detail" });
         }
     }
 
-    function renderPartDetailHtml(p) {
+    function jumpToProject(projectId) {
+        // Switch left tabbar to Projects, ensure the list is loaded,
+        // select the requested project (which fires loadProjectIntoCenter).
+        const tabbar = $$("pk-left-tabbar");
+        if (tabbar) tabbar.setValue("tab-projects");
+        loadProjectsList(true).then(() => {
+            const list = $$("pk-projects-list");
+            if (list && list.exists(projectId)) list.select(projectId);
+            else loadProjectIntoCenter(projectId);
+        });
+    }
+
+    function renderPartDetailHtml(p, projects, runs) {
         const sections = [];
 
         // Header
@@ -3901,6 +3938,49 @@
             }).join("");
             sections.push(detailSectionHtml(`Attachments (${p.attachments.length})`,
                 `<table class="pk-detail-table"><thead><tr><th>File</th><th>Type</th><th>Size</th></tr></thead><tbody>${rows}</tbody></table>`));
+        }
+
+        // Cross-cutting: which projects' BOMs reference this part
+        if (projects && projects.length) {
+            const rows = projects.map((row) => {
+                const overage = row.overage_type && row.overage
+                    ? ` <span class="pk-help-hint">(+${row.overage}${row.overage_type === "percent" ? "%" : ""})</span>`
+                    : "";
+                const remarks = row.remarks ? ` &mdash; <span class="pk-help-hint">${escapeHtml(row.remarks)}</span>` : "";
+                return `<tr>
+                    <td><a href="#" data-project-id="${row.project_id}">${escapeHtml(row.project_name)}</a></td>
+                    <td class="pk-numeric">${row.quantity}${overage}</td>
+                    <td>${remarks}</td>
+                </tr>`;
+            }).join("");
+            sections.push(detailSectionHtml(
+                `Used in projects (${projects.length})`,
+                `<table class="pk-detail-table">
+                    <thead><tr><th>Project</th><th class="pk-numeric">BOM qty</th><th>Notes</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`
+            ));
+        }
+
+        // Cross-cutting: recent project runs that consumed this part
+        if (runs && runs.length) {
+            const rows = runs.slice(0, 8).map((r) => {
+                const date = (r.run_date_time || "").substring(0, 10);
+                const lot = r.lot_number ? ` <span class="pk-help-hint">[${escapeHtml(r.lot_number)}]</span>` : "";
+                return `<tr>
+                    <td>${escapeHtml(date)}</td>
+                    <td><a href="#" data-project-id="${r.project_id}">${escapeHtml(r.project_name)}</a></td>
+                    <td class="pk-numeric">×${r.run_quantity}</td>
+                    <td class="pk-numeric pk-stock-remove">−${r.deducted_quantity}${lot}</td>
+                </tr>`;
+            }).join("");
+            sections.push(detailSectionHtml(
+                `Recent runs (${runs.length})`,
+                `<table class="pk-detail-table">
+                    <thead><tr><th>Date</th><th>Project</th><th class="pk-numeric">Run ×</th><th class="pk-numeric">Δ</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`
+            ));
         }
 
         return sections.join("");
