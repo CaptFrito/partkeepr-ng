@@ -26,6 +26,7 @@ pub mod part_distributor;
 pub mod part_manufacturer;
 pub mod part_measurement_unit;
 pub mod part_parameter;
+pub mod part_storage_location;
 pub mod project;
 pub mod project_attachment;
 pub mod project_part;

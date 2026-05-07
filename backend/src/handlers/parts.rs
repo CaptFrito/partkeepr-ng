@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
+    Extension, Json,
 };
 use chrono::{NaiveDateTime, Utc};
 use rust_decimal::Decimal;
@@ -575,6 +575,9 @@ pub struct PartDetail {
     pub stock_entries: Vec<StockEntryView>,
     /// Slice 11c: meta-part criteria. Empty for non-meta parts.
     pub criteria: Vec<MetaPartCriterionView>,
+    /// Multi-location breakdown — descriptive (not the source of truth
+    /// for stockLevel). Empty for parts the operator hasn't broken out.
+    pub locations: Vec<crate::handlers::part_locations::PartLocationView>,
 }
 
 const STOCK_ENTRY_LIMIT: i64 = 50;
@@ -716,6 +719,16 @@ pub async fn detail(
     .fetch_all(&pool)
     .await?;
 
+    // Multi-location breakdown (descriptive). Same SELECT shape as
+    // /api/parts/:pid/locations so the per-row CRUD endpoint and the
+    // detail-pane rendering stay in sync.
+    let locations: Vec<crate::handlers::part_locations::PartLocationView> = sqlx::query_as(
+        crate::handlers::part_locations::LIST_SELECT_SQL,
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
     Ok(Json(PartDetail {
         part,
         category,
@@ -728,6 +741,7 @@ pub async fn detail(
         attachments,
         stock_entries,
         criteria,
+        locations,
     }))
 }
 
@@ -769,6 +783,9 @@ pub struct PartWrite {
     /// is true; ignored otherwise (we still write through, since the
     /// storage is independent of the flag).
     pub criteria: Option<Vec<MetaPartCriterionWrite>>,
+    /// Multi-location breakdown. Same Some/None semantics as the
+    /// other children: None = leave alone, Some(vec) = atomic replace.
+    pub locations: Option<Vec<crate::handlers::part_locations::PartLocationWrite>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -838,6 +855,7 @@ fn validate_part(p: &PartWrite) -> Result<(), AppError> {
 
 pub async fn create(
     State(pool): State<MySqlPool>,
+    Extension(user): Extension<crate::handlers::auth::CurrentUser>,
     Json(req): Json<PartWrite>,
 ) -> Result<impl IntoResponse, AppError> {
     validate_part(&req)?;
@@ -874,7 +892,7 @@ pub async fn create(
 
     let new_id = result.last_insert_id() as i32;
 
-    insert_children(&mut tx, new_id, &req).await?;
+    insert_children(&mut tx, new_id, &req, user.user_id).await?;
 
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(serde_json::json!({"id": new_id}))))
@@ -882,6 +900,7 @@ pub async fn create(
 
 pub async fn update(
     State(pool): State<MySqlPool>,
+    Extension(user): Extension<crate::handlers::auth::CurrentUser>,
     Path(id): Path<i32>,
     Json(req): Json<PartWrite>,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -944,8 +963,12 @@ pub async fn update(
         sqlx::query("DELETE FROM MetaPartParameterCriteria WHERE part_id = ?")
             .bind(id).execute(&mut *tx).await?;
     }
+    if req.locations.is_some() {
+        sqlx::query("DELETE FROM PartStorageLocation WHERE part_id = ?")
+            .bind(id).execute(&mut *tx).await?;
+    }
 
-    insert_children(&mut tx, id, &req).await?;
+    insert_children(&mut tx, id, &req, user.user_id).await?;
 
     // lowStock flag follows from the *current* stockLevel (unchanged here)
     // and the new minStockLevel. Recompute it.
@@ -964,6 +987,7 @@ async fn insert_children(
     tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
     part_id: i32,
     req: &PartWrite,
+    user_id: i32,
 ) -> Result<(), AppError> {
     // Pre-fetch SiPrefix base/exponent so we can compute normalizedValue
     // without an extra round-trip per parameter. Used by parametric
@@ -1103,6 +1127,43 @@ async fn insert_children(
         .execute(&mut **tx)
         .await
         .map_err(map_fk_err)?;
+    }
+    // Multi-location breakdown rows. Each row gets timestamps + the
+    // current user stamped (matches the per-row CRUD behaviour in
+    // handlers/part_locations.rs).
+    if let Some(locs) = req.locations.as_ref() {
+        let now = Utc::now().naive_utc();
+        const VALID_FORMS: &[&str] = &[
+            "Loose", "Reel", "CutTape", "Tray", "Tube", "Feeder", "Bag", "Other",
+        ];
+        for l in locs {
+            if !VALID_FORMS.iter().any(|&f| f == l.form) {
+                return Err(AppError::BadRequest(
+                    "location.form must be one of Loose / Reel / CutTape / Tray / Tube / Feeder / Bag / Other",
+                ));
+            }
+            if l.quantity < 0 {
+                return Err(AppError::BadRequest("location.quantity must be >= 0"));
+            }
+            sqlx::query(
+                "INSERT INTO PartStorageLocation \
+                    (part_id, storageLocation_id, form, quantity, lotNumber, \
+                     comment, created, lastModified, user_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(part_id)
+            .bind(l.storage_location_id)
+            .bind(&l.form)
+            .bind(l.quantity)
+            .bind(l.lot_number.as_deref())
+            .bind(l.comment.as_deref())
+            .bind(now)
+            .bind(now)
+            .bind(user_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(map_fk_err)?;
+        }
     }
     Ok(())
 }

@@ -485,6 +485,33 @@
             if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
             return r.json();
         },
+        async partLocations(partId) {
+            const r = await fetch(`/api/parts/${partId}/locations`);
+            if (!r.ok) throw new Error(`locations list failed: ${r.status}`);
+            return r.json();
+        },
+        async createPartLocation(partId, body) {
+            const r = await fetch(`/api/parts/${partId}/locations`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create location failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updatePartLocation(partId, lid, body) {
+            const r = await fetch(`/api/parts/${partId}/locations/${lid}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update location failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deletePartLocation(partId, lid) {
+            const r = await fetch(`/api/parts/${partId}/locations/${lid}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete location failed: ${r.status} ${await r.text()}`);
+        },
         async metaMatches(metaPartId) {
             const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
             if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
@@ -5300,6 +5327,42 @@
         ];
         sections.push(detailSectionHtml("Stock", kvTable(stockRows)));
 
+        // Multi-location breakdown (descriptive). Hidden when the
+        // operator hasn't broken this part out — keeps the panel
+        // clean for ordinary single-bin parts.
+        if (p.locations && p.locations.length) {
+            const sum = p.locations.reduce((acc, l) => acc + (l.quantity || 0), 0);
+            const driftHtml = sum === p.stock_level
+                ? `<span class="pk-stock-add">matches stock level</span>`
+                : `<span class="pk-stock-remove">⚠ stock level = ${p.stock_level} (off by ${sum - p.stock_level >= 0 ? "+" : ""}${sum - p.stock_level})</span>`;
+            const rows = p.locations.map(l => {
+                const path = l.storage_location_path
+                    ? `<span class="pk-bom-cat">${escapeHtml(l.storage_location_path)}</span>`
+                    : "";
+                return `<tr>
+                    <td>${escapeHtml(l.form)}</td>
+                    <td>${escapeHtml(l.storage_location_name || "")} ${path}</td>
+                    <td class="pk-numeric">${l.quantity}</td>
+                    <td>${escapeHtml(l.lot_number || "")}</td>
+                    <td>${escapeHtml(l.comment || "")}</td>
+                </tr>`;
+            }).join("");
+            const footer = `<tr style="font-weight:600;background:#f3f5f7">
+                <td colspan="2" style="text-align:right">Total:</td>
+                <td class="pk-numeric">${sum}</td>
+                <td colspan="2">${driftHtml}</td>
+            </tr>`;
+            sections.push(detailSectionHtml(`Locations (${p.locations.length})`,
+                `<table class="pk-detail-table">
+                    <thead><tr>
+                        <th>Form</th><th>Where</th>
+                        <th class="pk-numeric">Qty</th>
+                        <th>Lot</th><th>Comment</th>
+                    </tr></thead>
+                    <tbody>${rows}${footer}</tbody>
+                </table>`));
+        }
+
         // Manufacturers
         if (p.manufacturers && p.manufacturers.length) {
             const rows = p.manufacturers.map(m =>
@@ -5632,6 +5695,28 @@
         if (sel) table.remove(sel);
     }
 
+    /// Live-recompute the Locations tab status label: "Total: N" with
+    /// a colored chip when the sum drifts from Part.stockLevel. Called
+    /// on every onAfterEditStop / onAfterAdd / row removal.
+    function updateLocationsTotal(seed) {
+        const grid = $$("pk-edit-locations");
+        const status = $$("pk-edit-locations-status");
+        if (!grid || !status) return;
+        let sum = 0;
+        grid.data.each((r) => { sum += parseInt(r.quantity, 10) || 0; });
+        const stockLevel = seed && seed.stock_level != null ? seed.stock_level : 0;
+        let html;
+        if (sum === stockLevel) {
+            html = `<span class="pk-stock-add">Total: <b>${sum}</b> · matches stock level</span>`;
+        } else {
+            const diff = sum - stockLevel;
+            const sign = diff > 0 ? "+" : "";
+            html = `<span class="pk-stock-remove">Total: <b>${sum}</b> ⚠ stock level = ${stockLevel} (off by ${sign}${diff})</span>`;
+        }
+        status.define("label", html);
+        status.refresh();
+    }
+
     // ============================================================
     //  Common Parameters library — built-in EE template list
     //
@@ -5930,6 +6015,14 @@
             unit_id: c.unit_id || null,
             si_prefix_id: c.si_prefix_id || null,
         }));
+        const locationRows = (seed.locations || []).map((l) => ({
+            id: webix.uid(),
+            form: l.form || "Loose",
+            storage_location_id: l.storage_location_id || null,
+            quantity: l.quantity != null ? String(l.quantity) : "0",
+            lot_number: l.lot_number || "",
+            comment: l.comment || "",
+        }));
 
         const mfgOptions = lookups.manufacturers.map((m) => ({ id: m.id, value: m.name }));
         const distOptions = lookups.distributors.map((d) => ({ id: d.id, value: d.name }));
@@ -5940,6 +6033,20 @@
             lookups.prefixes.map((p) => ({ id: p.id, value: p.symbol + " — " + p.prefix }))
         );
         const valueTypeOptions = [{ id: "numeric", value: "numeric" }, { id: "string", value: "string" }];
+        // Multi-location form enum — mirrors backend VALID_FORMS in
+        // handlers/part_locations.rs.
+        const formOptions = [
+            { id: "Loose",    value: "Loose" },
+            { id: "Reel",     value: "Reel" },
+            { id: "CutTape",  value: "CutTape" },
+            { id: "Tray",     value: "Tray" },
+            { id: "Tube",     value: "Tube" },
+            { id: "Feeder",   value: "Feeder" },
+            { id: "Bag",      value: "Bag" },
+            { id: "Other",    value: "Other" },
+        ];
+        // (storageOptions already defined above for the part-level field)
+        const storageLocNameById = new Map(lookups.storage_locations.map((s) => [String(s.id), s.name]));
         const opOptions = [
             { id: "=", value: "=" },
             { id: "!=", value: "≠" },
@@ -6294,6 +6401,62 @@
                                     ],
                                 },
                             },
+                            {
+                                header: "Locations",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100,
+                                                  click: () => editorAddRow("pk-edit-locations", { form: "Loose", quantity: "0" }) },
+                                                { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160,
+                                                  click: () => { editorRemoveRow("pk-edit-locations"); updateLocationsTotal(seed); } },
+                                                {},
+                                                { view: "label", id: "pk-edit-locations-status", label: "" },
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-locations",
+                                            editable: true,
+                                            editaction: "click",
+                                            select: "row",
+                                            data: locationRows,
+                                            on: {
+                                                onBeforeEditStart: function (state) {
+                                                    if (state && state.row) this.select(state.row);
+                                                },
+                                                onAfterEditStop: function () { updateLocationsTotal(seed); },
+                                                onAfterAdd: function () { updateLocationsTotal(seed); },
+                                            },
+                                            columns: [
+                                                {
+                                                    id: "form", header: "Form", width: 110,
+                                                    editor: "richselect",
+                                                    options: formOptions,
+                                                },
+                                                {
+                                                    id: "storage_location_id", header: "Where", fillspace: true,
+                                                    editor: "richselect",
+                                                    options: storageOptions,
+                                                    template: function (o) {
+                                                        if (!o.storage_location_id) return "";
+                                                        const name = storageLocNameById.get(String(o.storage_location_id));
+                                                        return name ? escapeHtml(name) : "";
+                                                    },
+                                                },
+                                                { id: "quantity", header: { text: "Qty", css: "pk-th-numeric" },
+                                                  width: 80, css: "pk-numeric", editor: "text" },
+                                                { id: "lot_number", header: "Lot", width: 130, editor: "text" },
+                                                { id: "comment", header: "Comment", width: 280, editor: "text" },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
                         ],
                     },
                     {
@@ -6314,6 +6477,9 @@
             },
         }).show();
         $$("pk-editor-form").setValues(initial);
+
+        // Initial render of the Locations status label (sum vs stockLevel).
+        setTimeout(() => updateLocationsTotal(seed), 0);
 
         // Populate the Attachments tab — only meaningful when editing
         // an existing part (new-mode parts have no id yet).
@@ -6412,6 +6578,19 @@
                     string_value: (r.string_value || "").trim() || null,
                     unit_id: r.unit_id ? parseInt(r.unit_id, 10) : null,
                     si_prefix_id: r.si_prefix_id ? parseInt(r.si_prefix_id, 10) : null,
+                }))
+            : [];
+        const locationsGrid = $$("pk-edit-locations");
+        body.locations = locationsGrid
+            ? locationsGrid.serialize()
+                // Drop rows missing a storage location — partial / abandoned rows
+                .filter((r) => r.storage_location_id)
+                .map((r) => ({
+                    storage_location_id: parseInt(r.storage_location_id, 10),
+                    form: r.form || "Loose",
+                    quantity: parseInt(r.quantity, 10) || 0,
+                    lot_number: (r.lot_number || "").trim() || null,
+                    comment: (r.comment || "").trim() || null,
                 }))
             : [];
         try {

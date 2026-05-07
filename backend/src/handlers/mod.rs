@@ -14,6 +14,7 @@ pub mod grid_presets;
 pub mod lookups;
 pub mod nested_set;
 pub mod parametric;
+pub mod part_locations;
 pub mod parts;
 pub mod projects;
 pub mod stock;
@@ -229,5 +230,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/grid_presets/:id",
             axum::routing::put(grid_presets::update).delete(grid_presets::delete),
+        )
+        // Multi-location parts (PartStorageLocation) — per-row CRUD.
+        .route(
+            "/api/parts/:pid/locations",
+            get(part_locations::list).post(part_locations::create),
+        )
+        .route(
+            "/api/parts/:pid/locations/:lid",
+            axum::routing::put(part_locations::update).delete(part_locations::delete),
         )
 }
