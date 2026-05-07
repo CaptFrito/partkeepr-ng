@@ -16,6 +16,7 @@ pub mod meta_help;
 pub mod param_help;
 pub mod part_detail;
 pub mod part_editor;
+pub mod grid_columns;
 pub mod parametric_filter;
 pub mod parts_grid;
 pub mod project_edit_dialog;

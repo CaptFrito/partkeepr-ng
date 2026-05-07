@@ -1498,3 +1498,38 @@ table.parts tr.section-header-row > td .count {
     color: #9ca3af;
     font-weight: 400;
 }
+
+/* ----------------------------------------------------------------------- */
+/* Slice 6c: column reorder + resize affordances                           */
+/* ----------------------------------------------------------------------- */
+
+table.parts th.col-th {
+    position: relative;     /* anchor the resize handle absolutely */
+    cursor: grab;           /* hint that the header is draggable */
+    user-select: none;
+}
+table.parts th.col-th:active { cursor: grabbing; }
+.col-th-label { cursor: pointer; }   /* clicking the label still sorts */
+
+.col-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -2px;        /* overhang so the hit area straddles the gridline */
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 2;          /* above the th label */
+    background: transparent;
+    transition: background 80ms;
+}
+.col-resize-handle:hover { background: #2563eb; opacity: 0.5; }
+.col-resize-handle:active { background: #2563eb; opacity: 0.7; }
+
+th.col-reset-cell, td.col-reset-cell {
+    width: 24px;
+    text-align: center;
+    cursor: pointer;
+    color: #9ca3af;
+}
+th.col-reset-cell:hover { color: #2563eb; }
+td.col-reset-cell { cursor: default; }

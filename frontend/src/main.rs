@@ -175,6 +175,16 @@ pub struct MetaFilterState(pub RwSignal<MetaFilter>);
 /// and the existing search / category / etc. set.
 #[derive(Clone, Copy)]
 pub struct FieldFiltersState(pub RwSignal<api::FieldFilters>);
+
+/// Slice 6c — parts-grid column layout (order + widths). Persisted
+/// to localStorage on every mutation; loaded once on app start.
+#[derive(Clone, Copy)]
+pub struct GridColumnsState(pub RwSignal<Vec<components::grid_columns::ColumnState>>);
+
+/// Slice 6c — drag-reorder state. Holds the column id currently being
+/// dragged so dragover/drop handlers can find it. None when no drag.
+#[derive(Clone, Copy)]
+pub struct ColumnDragState(pub RwSignal<Option<String>>);
 /// Open stock-entry dialog. None when closed.
 #[derive(Clone, Copy)]
 pub struct StockDialogState(pub RwSignal<Option<StockDialogCtx>>);
@@ -614,6 +624,8 @@ fn App() -> impl IntoView {
     let predicates = PredicatesState(RwSignal::new(read_predicates_from_hash()));
     let meta_filter = MetaFilterState(RwSignal::new(MetaFilter::All));
     let field_filters = FieldFiltersState(RwSignal::new(api::FieldFilters::default()));
+    let grid_columns = GridColumnsState(RwSignal::new(components::grid_columns::load_layout()));
+    let column_drag = ColumnDragState(RwSignal::new(None));
 
     provide_context(selected_category);
     provide_context(selected_part);
@@ -650,6 +662,14 @@ fn App() -> impl IntoView {
     provide_context(predicates);
     provide_context(meta_filter);
     provide_context(field_filters);
+    provide_context(grid_columns);
+    provide_context(column_drag);
+
+    // Persist column layout to localStorage on any mutation.
+    Effect::new(move |_| {
+        let layout = grid_columns.0.get();
+        components::grid_columns::save_layout(&layout);
+    });
 
     // Push predicate changes into the URL hash so a filtered view is
     // shareable / reload-survivable. Reads happen once on mount above.

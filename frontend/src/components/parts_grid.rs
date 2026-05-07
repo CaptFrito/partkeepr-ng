@@ -1,13 +1,16 @@
 use leptos::prelude::*;
 
+use wasm_bindgen::JsCast;
+
 use crate::api;
+use crate::components::grid_columns::{meta_for, ColumnState};
 use crate::components::ParametricFilter;
 use crate::types::{CategoryNode, FootprintTreeNode, PartRow, StorageTreeNode};
 use crate::{
-    DataVersion, EditorMode, EditorModeState, FieldFiltersState, FootprintSelection,
-    LeftPaneMode, LeftPaneModeState, MetaFilter, MetaFilterState, Offset, PredicatesState,
-    Search, SelectedCategory, SelectedFootprint, SelectedPart, SelectedStorage, Sort,
-    StorageSelection,
+    ColumnDragState, DataVersion, EditorMode, EditorModeState, FieldFiltersState,
+    FootprintSelection, GridColumnsState, LeftPaneMode, LeftPaneModeState, MetaFilter,
+    MetaFilterState, Offset, PredicatesState, Search, SelectedCategory, SelectedFootprint,
+    SelectedPart, SelectedStorage, Sort, StorageSelection,
 };
 
 const PAGE_SIZE: u32 = 50;
@@ -285,29 +288,16 @@ pub fn PartsGrid() -> impl IntoView {
             // Single static table — thead (column titles + per-column
             // filter row) lives outside the Suspense so the filter
             // <input> elements stay mounted across data refetches.
-            // Without this, every keystroke fires a refetch, recreates
-            // the table, and unmounts/remounts the filter inputs (focus
-            // loss after every character).
+            // Columns are driven by GridColumnsState so reorder/resize
+            // updates a signal, not the DOM directly.
             <table class="parts">
-                <thead>
-                    <tr>
-                        <SortableTh label="#" col="id" width="60px" align_right=true />
-                        <SortableTh label="Name" col="name" width="" />
-                        <SortableTh label="Description" col="description" width="" />
-                        <SortableTh label="Stock" col="stock_level" width="60px" align_right=true />
-                        <SortableTh label="Min" col="min_stock_level" width="50px" align_right=true />
-                        <SortableTh label="Status" col="status" width="80px" />
-                        <SortableTh label="Condition" col="part_condition" width="80px" />
-                        <SortableTh label="Avg Price" col="average_price" width="80px" align_right=true />
-                    </tr>
-                    <ColumnFilterRow/>
-                </thead>
+                <ColumnsThead/>
                 <Suspense fallback=|| view! {
-                    <tbody><tr><td colspan="8" class="muted" style="padding:12px">"Loading…"</td></tr></tbody>
+                    <tbody><tr><td colspan="99" class="muted" style="padding:12px">"Loading…"</td></tr></tbody>
                 }>
                     {move || parts.get().map(|res| match &*res {
                         Err(e) => view! {
-                            <tbody><tr><td colspan="8" class="muted" style="padding:12px">
+                            <tbody><tr><td colspan="99" class="muted" style="padding:12px">
                                 {format!("Error: {}", e.0)}
                             </td></tr></tbody>
                         }.into_any(),
@@ -358,61 +348,239 @@ fn GroupedTbodies(items: Vec<PartRow>) -> impl IntoView {
     }
 }
 
+/// Slice 6c — top header row + filter row, driven by the columns signal.
+/// Each column header is draggable for reorder; right-edge handle
+/// resizes the column width.
 #[component]
-fn SortableTh(
-    label: &'static str,
-    col: &'static str,
-    width: &'static str,
-    #[prop(optional)] align_right: bool,
+fn ColumnsThead() -> impl IntoView {
+    let columns = expect_context::<GridColumnsState>().0;
+    let drag = expect_context::<ColumnDragState>().0;
+
+    let on_reset = move |_: leptos::ev::MouseEvent| {
+        columns.set(crate::components::grid_columns::default_layout());
+    };
+
+    view! {
+        <thead>
+            <tr>
+                {move || columns.with(|cols| cols.iter().enumerate().filter_map(|(idx, c)| {
+                    if !c.visible { return None; }
+                    let meta = meta_for(&c.id)?;
+                    Some(view! {
+                        <ColumnHeaderTh idx=idx col=c.clone() meta=meta drag=drag/>
+                    })
+                }).collect::<Vec<_>>())}
+                // Tiny "reset" cell at the far right so users have an
+                // escape hatch when they've made the layout unworkable.
+                <th class="col-reset-cell" title="Reset column layout to defaults"
+                    on:click=on_reset>"⟲"</th>
+            </tr>
+            <ColumnFilterRow/>
+        </thead>
+    }
+}
+
+#[component]
+fn ColumnHeaderTh(
+    idx: usize,
+    col: ColumnState,
+    meta: &'static crate::components::grid_columns::ColumnMeta,
+    drag: leptos::prelude::RwSignal<Option<String>>,
 ) -> impl IntoView {
     let sort = expect_context::<Sort>().0;
+    let columns = expect_context::<GridColumnsState>().0;
 
-    let style = format!(
-        "{}{}",
-        if width.is_empty() { String::new() } else { format!("width:{width};") },
-        if align_right { "text-align:right;" } else { "" }
-    );
+    let col_id = col.id.clone();
+    let col_id_for_sort = col_id.clone();
+    let col_id_for_drop = col_id.clone();
+    let col_id_for_drag_start = col_id.clone();
+
+    let sort_key = meta.sort_key;
+    let label = meta.label;
+    let align_right = meta.align_right;
+
+    let style = {
+        let mut s = String::new();
+        if col.width > 0 {
+            s.push_str(&format!("width:{}px;", col.width));
+        }
+        if align_right { s.push_str("text-align:right;"); }
+        s
+    };
 
     let (arrow_text, arrow_cls) = (
         move || {
             let (c, asc) = sort.get();
-            if c == col { if asc { "▲" } else { "▼" } } else { "↕" }
+            if c == sort_key { if asc { "▲" } else { "▼" } } else { "↕" }
         },
         move || {
             let (c, _) = sort.get();
-            if c == col { "arrow active" } else { "arrow idle" }
+            if c == sort_key { "arrow active" } else { "arrow idle" }
         },
     );
 
+    let on_label_click = move |_: leptos::ev::MouseEvent| {
+        sort.update(|s| {
+            if s.0 == sort_key {
+                if s.1 { s.1 = false; }
+                else { *s = (String::new(), true); }
+            } else {
+                *s = (sort_key.to_string(), true);
+            }
+        });
+    };
+
+    // Resize: a thin handle at the right edge. mousedown captures the
+    // pointer (start_x, start_w), then global mousemove updates the
+    // column width until mouseup releases.
+    let on_resize_start = move |ev: leptos::ev::MouseEvent| {
+        ev.stop_propagation();
+        ev.prevent_default();
+        let start_x = ev.client_x();
+        let cid = col_id.clone();
+        let start_w = columns.with(|cs| cs.iter()
+            .find(|c| c.id == cid)
+            .map(|c| if c.width == 0 { 100 } else { c.width })
+            .unwrap_or(100));
+        let win = match web_sys::window() { Some(w) => w, None => return };
+        // Closures held alive in shared state until mouseup removes them.
+        let move_handler: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MouseEvent)>>>> = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let up_handler: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MouseEvent)>>>> = std::rc::Rc::new(std::cell::RefCell::new(None));
+
+        let cid_for_move = cid.clone();
+        let mh = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::MouseEvent| {
+            let dx = ev.client_x() - start_x;
+            let new_w = (start_w + dx).max(30);
+            columns.update(|cs| {
+                if let Some(c) = cs.iter_mut().find(|c| c.id == cid_for_move) {
+                    c.width = new_w;
+                }
+            });
+        }) as Box<dyn FnMut(web_sys::MouseEvent)>);
+        let mh_ref = mh.as_ref().unchecked_ref::<web_sys::js_sys::Function>().clone();
+        *move_handler.borrow_mut() = Some(mh);
+
+        let move_handler_for_up = move_handler.clone();
+        let up_handler_for_self = up_handler.clone();
+        let win_for_up = win.clone();
+        let mh_ref_for_up = mh_ref.clone();
+        let uh = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::MouseEvent| {
+            let _ = win_for_up.remove_event_listener_with_callback("mousemove", &mh_ref_for_up);
+            // Take the up-handler reference so we can detach it; this
+            // also drops the closure once the local Rc clones run out.
+            if let Some(uh) = up_handler_for_self.borrow_mut().take() {
+                let uh_ref = uh.as_ref().unchecked_ref::<web_sys::js_sys::Function>().clone();
+                let _ = win_for_up.remove_event_listener_with_callback("mouseup", &uh_ref);
+                drop(uh);
+            }
+            // Drop the move handler so the closure deallocates.
+            move_handler_for_up.borrow_mut().take();
+        }) as Box<dyn FnMut(web_sys::MouseEvent)>);
+        let uh_ref = uh.as_ref().unchecked_ref::<web_sys::js_sys::Function>().clone();
+        *up_handler.borrow_mut() = Some(uh);
+
+        let _ = win.add_event_listener_with_callback("mousemove", &mh_ref);
+        let _ = win.add_event_listener_with_callback("mouseup", &uh_ref);
+    };
+
+    let on_drag_start = move |ev: leptos::ev::DragEvent| {
+        // The resize handle is a span *inside* this draggable <th>.
+        // Browsers walk up to the nearest draggable ancestor when a
+        // mousedown bubbles into a drag, so a resize-handle mousedown
+        // would otherwise initiate a column reorder. Cancel the drag
+        // when its origin element is the resize handle.
+        if let Some(target) = ev.target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let cls = el.class_name();
+                if cls.contains("col-resize-handle") {
+                    ev.prevent_default();
+                    return;
+                }
+            }
+        }
+        let _ = ev.data_transfer().map(|dt| {
+            let _ = dt.set_data("text/plain", &col_id_for_drag_start);
+            dt.set_effect_allowed("move");
+        });
+        drag.set(Some(col_id_for_drag_start.clone()));
+    };
+    let on_drag_over = move |ev: leptos::ev::DragEvent| {
+        if drag.get_untracked().is_some() {
+            ev.prevent_default();
+            if let Some(dt) = ev.data_transfer() {
+                dt.set_drop_effect("move");
+            }
+        }
+    };
+    let on_drop = move |ev: leptos::ev::DragEvent| {
+        ev.prevent_default();
+        let dragged = match drag.get_untracked() {
+            Some(d) => d,
+            None => return,
+        };
+        if dragged == col_id_for_drop { return; }
+        columns.update(|cs| {
+            let from = match cs.iter().position(|c| c.id == dragged) {
+                Some(i) => i,
+                None => return,
+            };
+            let to = match cs.iter().position(|c| c.id == col_id_for_drop) {
+                Some(i) => i,
+                None => return,
+            };
+            let item = cs.remove(from);
+            cs.insert(to, item);
+        });
+        drag.set(None);
+    };
+    let on_drag_end = move |_: leptos::ev::DragEvent| {
+        drag.set(None);
+    };
+
     view! {
-        <th class="sortable" style=style
-            on:click=move |_| {
-                sort.update(|s| {
-                    if s.0 == col {
-                        // Cycle: asc -> desc -> off
-                        if s.1 { s.1 = false; }
-                        else { *s = (String::new(), true); }
-                    } else {
-                        *s = (col.to_string(), true);
-                    }
-                });
-            }>
-            {label}<span class=arrow_cls>{arrow_text}</span>
+        <th class="sortable col-th" style=style
+            draggable="true"
+            on:dragstart=on_drag_start
+            on:dragover=on_drag_over
+            on:drop=on_drop
+            on:dragend=on_drag_end>
+            <span class="col-th-label" on:click=on_label_click>
+                {label}<span class=arrow_cls>{arrow_text}</span>
+            </span>
+            <span class="col-resize-handle" on:mousedown=on_resize_start
+                title="Drag to resize column"></span>
         </th>
     }
 }
 
 /// Slice 6b — second header row with one inline filter input per
-/// filterable column. Reads/writes the shared `FieldFiltersState`, so
-/// inline filters and the filter pane stay in sync (where they share
-/// fields, e.g. nothing — the pane has no name/description/IPN inputs).
+/// filterable column. Driven by GridColumnsState so reorder
+/// automatically reorders the filter row too. Reads/writes the shared
+/// `FieldFiltersState`.
 #[component]
 fn ColumnFilterRow() -> impl IntoView {
-    let fields = expect_context::<FieldFiltersState>().0;
+    let columns = expect_context::<GridColumnsState>().0;
+    view! {
+        <tr class="col-filter-row">
+            {move || columns.with(|cols| cols.iter().filter_map(|c| {
+                if !c.visible { return None; }
+                Some(filter_cell_for(&c.id))
+            }).collect::<Vec<_>>())}
+            // Spacer matching the reset cell in the title row.
+            <th class="col-filter col-reset-cell"></th>
+        </tr>
+    }
+}
 
-    // Generic LIKE-input cell.
-    let like_cell = move |get: fn(&api::FieldFilters) -> Option<String>,
-                          set: fn(&mut api::FieldFilters, Option<String>)| -> AnyView {
+/// Render the inline-filter <th> for a given column id. Centralised
+/// here so both the title row and the row-cell renderer dispatch the
+/// same way.
+fn filter_cell_for(col_id: &str) -> AnyView {
+    let fields = expect_context::<FieldFiltersState>().0;
+    let like_cell = |
+        get: fn(&api::FieldFilters) -> Option<String>,
+        set: fn(&mut api::FieldFilters, Option<String>),
+    | -> AnyView {
         let value = move || fields.with(|f| get(f)).unwrap_or_default();
         let on_input = move |ev: leptos::ev::Event| {
             let v = event_target_value(&ev);
@@ -427,59 +595,38 @@ fn ColumnFilterRow() -> impl IntoView {
             </th>
         }.into_any()
     };
-
-    // Stock min/max range cell. Two tiny inputs side by side under one <th>.
-    let stock_min_value = move || fields.with(|f| f.stock_min).map(|n| n.to_string()).unwrap_or_default();
-    let stock_max_value = move || fields.with(|f| f.stock_max).map(|n| n.to_string()).unwrap_or_default();
-    let on_stock_min = move |ev: leptos::ev::Event| {
-        let v = event_target_value(&ev);
-        fields.update(|f| {
-            f.stock_min = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
-        });
-    };
-    let on_stock_max = move |ev: leptos::ev::Event| {
-        let v = event_target_value(&ev);
-        fields.update(|f| {
-            f.stock_max = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
-        });
-    };
-
-    view! {
-        <tr class="col-filter-row">
-            // # column — no filter (filtering by id is rarely useful).
-            <th class="col-filter"></th>
-            {like_cell(
-                |f| f.name_like.clone(),
-                |f, v| f.name_like = v,
-            )}
-            {like_cell(
-                |f| f.description_like.clone(),
-                |f, v| f.description_like = v,
-            )}
-            <th class="col-filter">
-                <span class="col-filter-range">
-                    <input type="number" min="0" placeholder="min"
-                        prop:value=stock_min_value on:input=on_stock_min/>
-                    <input type="number" min="0" placeholder="max"
-                        prop:value=stock_max_value on:input=on_stock_max/>
-                </span>
-            </th>
-            // Min column — no per-column filter (the "Stock = Low" pill
-            // in the side panel does what most operators want here).
-            <th class="col-filter"></th>
-            {like_cell(
-                |f| f.status_like.clone(),
-                |f, v| f.status_like = v,
-            )}
-            {like_cell(
-                |f| f.condition_like.clone(),
-                |f, v| f.condition_like = v,
-            )}
-            // Avg Price — the side panel's price-range inputs cover
-            // this column. Skip the inline duplicate to avoid two
-            // surfaces editing the same fields.
-            <th class="col-filter"></th>
-        </tr>
+    match col_id {
+        "name"            => like_cell(|f| f.name_like.clone(),            |f, v| f.name_like = v),
+        "description"     => like_cell(|f| f.description_like.clone(),     |f, v| f.description_like = v),
+        "status"          => like_cell(|f| f.status_like.clone(),          |f, v| f.status_like = v),
+        "part_condition"  => like_cell(|f| f.condition_like.clone(),       |f, v| f.condition_like = v),
+        "stock_level" => {
+            let stock_min_value = move || fields.with(|f| f.stock_min).map(|n| n.to_string()).unwrap_or_default();
+            let stock_max_value = move || fields.with(|f| f.stock_max).map(|n| n.to_string()).unwrap_or_default();
+            let on_stock_min = move |ev: leptos::ev::Event| {
+                let v = event_target_value(&ev);
+                fields.update(|f| {
+                    f.stock_min = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
+                });
+            };
+            let on_stock_max = move |ev: leptos::ev::Event| {
+                let v = event_target_value(&ev);
+                fields.update(|f| {
+                    f.stock_max = if v.trim().is_empty() { None } else { v.trim().parse().ok() };
+                });
+            };
+            view! {
+                <th class="col-filter">
+                    <span class="col-filter-range">
+                        <input type="number" min="0" placeholder="min"
+                            prop:value=stock_min_value on:input=on_stock_min/>
+                        <input type="number" min="0" placeholder="max"
+                            prop:value=stock_max_value on:input=on_stock_max/>
+                    </span>
+                </th>
+            }.into_any()
+        }
+        _ => view! { <th class="col-filter"></th> }.into_any(),
     }
 }
 
@@ -597,33 +744,54 @@ fn walk_footprint_leaf(node: &FootprintTreeNode, id: i32) -> Option<String> {
 #[component]
 fn PartRowView(p: PartRow) -> impl IntoView {
     let selected_part = expect_context::<SelectedPart>().0;
+    let columns = expect_context::<GridColumnsState>().0;
     let id = p.id;
-    let stock_class = if p.low_stock { "right low-stock" } else { "right" };
     let is_meta = p.meta_part;
     let row_class = if is_meta { "part-row meta-part-row" } else { "part-row" };
-    let name_view = if is_meta {
-        view! {
-            <td class="meta-part-name">
-                <span>{p.name}</span>
-                <span class="meta-tag" title="Meta-part: matches any real part satisfying its criteria">"(meta)"</span>
-            </td>
-        }.into_any()
-    } else {
-        view! { <td>{p.name}</td> }.into_any()
-    };
+    let p_for_cells = p.clone();
 
     view! {
         <tr class=row_class
             class:selected=move || selected_part.get() == Some(id)
             on:click=move |_| selected_part.set(Some(id))>
-            <td class="right">{p.id}</td>
-            {name_view}
-            <td>{p.description.unwrap_or_default()}</td>
-            <td class=stock_class>{p.stock_level}</td>
-            <td class="right muted">{p.min_stock_level}</td>
-            <td>{p.status.unwrap_or_default()}</td>
-            <td>{p.part_condition.unwrap_or_default()}</td>
-            <td class="right">{p.average_price}</td>
+            {move || columns.with(|cols| cols.iter().filter_map(|c| {
+                if !c.visible { return None; }
+                Some(render_cell(&c.id, &p_for_cells))
+            }).collect::<Vec<_>>())}
+            // Spacer matching the reset cell in the title row.
+            <td class="col-reset-cell"></td>
         </tr>
+    }
+}
+
+/// Slice 6c — render one part-row cell based on the column id. Mirrors
+/// the dispatch in `filter_cell_for` so reorder/show-hide is symmetrical
+/// across the title row, filter row, and body row.
+fn render_cell(col_id: &str, p: &PartRow) -> AnyView {
+    match col_id {
+        "id" => view! { <td class="right">{p.id}</td> }.into_any(),
+        "name" => {
+            let name = p.name.clone();
+            if p.meta_part {
+                view! {
+                    <td class="meta-part-name">
+                        <span>{name}</span>
+                        <span class="meta-tag" title="Meta-part: matches any real part satisfying its criteria">"(meta)"</span>
+                    </td>
+                }.into_any()
+            } else {
+                view! { <td>{name}</td> }.into_any()
+            }
+        }
+        "description" => view! { <td>{p.description.clone().unwrap_or_default()}</td> }.into_any(),
+        "stock_level" => {
+            let cls = if p.low_stock { "right low-stock" } else { "right" };
+            view! { <td class=cls>{p.stock_level}</td> }.into_any()
+        }
+        "min_stock_level" => view! { <td class="right muted">{p.min_stock_level}</td> }.into_any(),
+        "status" => view! { <td>{p.status.clone().unwrap_or_default()}</td> }.into_any(),
+        "part_condition" => view! { <td>{p.part_condition.clone().unwrap_or_default()}</td> }.into_any(),
+        "average_price" => view! { <td class="right">{p.average_price.clone()}</td> }.into_any(),
+        _ => view! { <td></td> }.into_any(),
     }
 }
