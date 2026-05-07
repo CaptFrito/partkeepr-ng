@@ -216,6 +216,19 @@
 .pk-stock-add { color: #1e7e34; font-weight: 600; }
 .pk-stock-remove { color: #b03030; font-weight: 600; }
 
+/* Editor sub-table prompts and hints */
+.pk-pick-prompt {
+    color: #b09a3e;
+    font-style: italic;
+    font-size: 11px;
+}
+
+.pk-help-hint {
+    color: #6a7a8a;
+    font-size: 11px;
+    font-style: italic;
+}
+
 /* =================================================================
    Detail action toolbar (Add stock / Remove / Reconcile)
    ================================================================= */
@@ -250,6 +263,19 @@
 .pk-btn-remove .webix_button:hover,
 .pk-btn-remove button:hover {
     background: #8c2424 !important;
+}
+
+/* Purple = meta-part — distinct from the regular green +Part to make it
+   clear this is a different concept (a search predicate, not a real part). */
+.pk-btn-meta .webix_button,
+.pk-btn-meta button {
+    background: #884ea0 !important;
+    color: #fff !important;
+    border-color: #6c3a82 !important;
+}
+.pk-btn-meta .webix_button:hover,
+.pk-btn-meta button:hover {
+    background: #6c3a82 !important;
 }
 
 /* =================================================================

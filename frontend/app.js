@@ -63,6 +63,55 @@
             }
             return r.json();
         },
+        async deletePart(id) {
+            const r = await fetch(`/api/parts/${id}`, { method: "DELETE" });
+            if (!r.ok) {
+                const txt = await r.text();
+                throw new Error(`delete failed: ${r.status} ${txt}`);
+            }
+        },
+        async updatePart(id, body) {
+            const r = await fetch(`/api/parts/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const txt = await r.text();
+                throw new Error(`update failed: ${r.status} ${txt}`);
+            }
+            return r.json();
+        },
+        async createPart(body) {
+            const r = await fetch("/api/parts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const txt = await r.text();
+                throw new Error(`create failed: ${r.status} ${txt}`);
+            }
+            return r.json();
+        },
+        async lookups() {
+            const fetchJson = (u) => fetch(u).then((r) => {
+                if (!r.ok) throw new Error(`${u} failed: ${r.status}`);
+                return r.json();
+            });
+            const [categories_tree, footprints, manufacturers, distributors, storage_locations, part_units, units, prefixes] =
+                await Promise.all([
+                    fetchJson("/api/part_categories/tree"),
+                    fetchJson("/api/footprints"),
+                    fetchJson("/api/manufacturers"),
+                    fetchJson("/api/distributors"),
+                    fetchJson("/api/storage_locations"),
+                    fetchJson("/api/part_measurement_units"),
+                    fetchJson("/api/units"),
+                    fetchJson("/api/si_prefixes"),
+                ]);
+            return { categories_tree, footprints, manufacturers, distributors, storage_locations, part_units, units, prefixes };
+        },
     };
 
     // ============================================================
@@ -280,10 +329,31 @@
                 {
                     view: "toolbar",
                     css: "pk-pane-toolbar",
-                    height: 32,
+                    height: 40,
                     cols: [
                         { view: "label", id: "pk-grid-title", label: "Parts", css: "pk-pane-title" },
                         {},
+                        {
+                            view: "button",
+                            value: "+ Part",
+                            css: "pk-btn-add",
+                            width: 95,
+                            click: () => openPartEditor("new"),
+                        },
+                        {
+                            view: "button",
+                            value: "+ Meta-Part",
+                            css: "pk-btn-meta",
+                            width: 125,
+                            click: () => openPartEditor("new", { metaPart: true }),
+                        },
+                        {
+                            view: "button",
+                            value: "⎘ Duplicate",
+                            css: "webix_primary",
+                            width: 130,
+                            click: () => openPartEditor("duplicate"),
+                        },
                         {
                             view: "search",
                             id: "pk-search",
@@ -412,34 +482,60 @@
                     ],
                 },
                 {
-                    view: "toolbar",
                     id: "pk-detail-actions",
-                    css: "pk-detail-actions",
-                    height: 38,
                     hidden: true,
-                    cols: [
+                    rows: [
                         {
-                            view: "button",
-                            value: "+ Add stock",
-                            css: "pk-btn-add",
-                            width: 110,
-                            click: () => openStockDialog("add"),
+                            view: "toolbar",
+                            css: "pk-detail-actions",
+                            height: 42,
+                            cols: [
+                                {
+                                    view: "button",
+                                    value: "+ Add stock",
+                                    css: "pk-btn-add",
+                                    width: 110,
+                                    click: () => openStockDialog("add"),
+                                },
+                                {
+                                    view: "button",
+                                    value: "− Remove",
+                                    css: "pk-btn-remove",
+                                    width: 100,
+                                    click: () => openStockDialog("remove"),
+                                },
+                                {
+                                    view: "button",
+                                    value: "⇄ Reconcile",
+                                    css: "webix_primary",
+                                    width: 120,
+                                    click: () => openStockDialog("reconcile"),
+                                },
+                                {},
+                            ],
                         },
                         {
-                            view: "button",
-                            value: "− Remove",
-                            css: "pk-btn-remove",
-                            width: 100,
-                            click: () => openStockDialog("remove"),
+                            view: "toolbar",
+                            css: "pk-detail-actions",
+                            height: 42,
+                            cols: [
+                                {
+                                    view: "button",
+                                    value: "✎ Edit",
+                                    css: "webix_primary",
+                                    width: 100,
+                                    click: () => openPartEditor("edit"),
+                                },
+                                {
+                                    view: "button",
+                                    value: "🗑 Delete",
+                                    css: "pk-btn-remove",
+                                    width: 110,
+                                    click: () => openDeleteDialog(),
+                                },
+                                {},
+                            ],
                         },
-                        {
-                            view: "button",
-                            value: "⇄ Reconcile",
-                            css: "webix_primary",
-                            width: 110,
-                            click: () => openStockDialog("reconcile"),
-                        },
-                        {},
                     ],
                 },
                 {
@@ -528,8 +624,8 @@
         if (p.parameters && p.parameters.length) {
             const rows = p.parameters.map(prm => {
                 let value = "";
-                if (prm.value_type === "numeric" && prm.numeric_value != null) {
-                    value = `${prm.numeric_value} ${prm.prefix_symbol || ""}${prm.unit_symbol || ""}`.trim();
+                if (prm.value_type === "numeric" && prm.value != null) {
+                    value = `${prm.value} ${prm.si_prefix_symbol || ""}${prm.unit_symbol || ""}`.trim();
                 } else if (prm.string_value) {
                     value = prm.string_value;
                 }
@@ -740,6 +836,663 @@
             console.error(e);
             webix.message({ type: "error", text: "Stock save failed: " + (e.message || e) });
         }
+    }
+
+    // ============================================================
+    //  Lookups cache (categories, footprints, etc.) — lazy-loaded
+    //  on first editor open and reused.
+    // ============================================================
+
+    let lookupsCache = null;
+
+    async function ensureLookups() {
+        if (!lookupsCache) lookupsCache = await api.lookups();
+        return lookupsCache;
+    }
+
+    // Flatten the category tree into a list of {id, value: breadcrumb}
+    // so a Webix combo can render it linearly while still showing the path.
+    function flattenCategoryTree(tree) {
+        const out = [];
+        function walk(nodes, indent) {
+            for (const n of nodes) {
+                const prefix = "  ".repeat(indent);
+                out.push({ id: n.id, value: prefix + n.name });
+                if (n.children && n.children.length) walk(n.children, indent + 1);
+            }
+        }
+        walk(tree, 0);
+        return out;
+    }
+
+    // ============================================================
+    //  Part editor (Identity / Classification / Manufacturers /
+    //  Distributors / Parameters tabs)
+    // ============================================================
+
+    function editorAddRow(tableId, defaults) {
+        const table = $$(tableId);
+        if (!table) return;
+        const row = Object.assign({ id: webix.uid() }, defaults || {});
+        table.add(row);
+        table.select(row.id);
+        table.editCell(row.id, table.config.columns[0].id);
+    }
+
+    function editorRemoveRow(tableId) {
+        const table = $$(tableId);
+        if (!table) return;
+        const sel = table.getSelectedId();
+        if (sel) table.remove(sel);
+    }
+
+
+    async function openPartEditor(mode, opts) {
+        opts = opts || {};
+        if ((mode === "edit" || mode === "duplicate") && !currentPart) {
+            webix.message({ type: "error", text: "Select a part first." });
+            return;
+        }
+
+        let lookups;
+        try {
+            lookups = await ensureLookups();
+        } catch (e) {
+            webix.message({ type: "error", text: "Failed to load lookups: " + (e.message || e) });
+            return;
+        }
+
+        const categoryOptions = flattenCategoryTree(lookups.categories_tree);
+        const footprintOptions = lookups.footprints.map((f) => ({ id: f.id, value: f.name }));
+        const storageOptions = lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }));
+        const partUnitOptions = lookups.part_units.map((u) => ({
+            id: u.id, value: u.name + (u.short_name ? ` (${u.short_name})` : ""),
+        }));
+
+        // Seed values:
+        //   edit       — start from currentPart, save via PUT
+        //   new        — blank (or {meta_part: true} when opts.metaPart)
+        //   duplicate  — copy of currentPart, name gets " (copy)" suffix,
+        //                save via POST so a new id is assigned
+        let seed;
+        if (mode === "edit") {
+            seed = currentPart;
+        } else if (mode === "duplicate") {
+            seed = Object.assign({}, currentPart, {
+                name: (currentPart.name || "") + " (copy)",
+                internal_part_number: "",
+            });
+        } else {
+            seed = opts.metaPart ? { meta_part: true } : {};
+        }
+
+        // Sub-table seed rows (W4.3). Webix datatable rows need a stable
+        // local id; we mint one with webix.uid() so add/remove works
+        // even before the row has a server-side id.
+        const mfgRows = (seed.manufacturers || []).map((m) => ({
+            id: webix.uid(),
+            manufacturer_id: m.manufacturer_id,
+            part_number: m.part_number || "",
+        }));
+        const distRows = (seed.distributors || []).map((d) => ({
+            id: webix.uid(),
+            distributor_id: d.distributor_id,
+            order_number: d.order_number || "",
+            price: d.price != null ? String(d.price) : "",
+            currency: d.currency || "",
+            sku: d.sku || "",
+            packaging_unit: d.packaging_unit != null ? d.packaging_unit : 1,
+            ignore_for_reports: !!d.ignore_for_reports,
+        }));
+        const paramRows = (seed.parameters || []).map((p) => ({
+            id: webix.uid(),
+            name: p.name || "",
+            description: p.description || "",
+            value_type: p.value_type || "numeric",
+            value: p.value != null ? String(p.value) : "",
+            string_value: p.string_value || "",
+            unit_id: p.unit_id || null,
+            si_prefix_id: p.si_prefix_id || null,
+        }));
+        const criteriaRows = (seed.criteria || []).map((c) => ({
+            id: webix.uid(),
+            name: c.name || "",
+            op: c.op || "=",
+            value_type: c.value_type || "numeric",
+            value: c.value != null ? String(c.value) : "",
+            string_value: c.string_value || "",
+            unit_id: c.unit_id || null,
+            si_prefix_id: c.si_prefix_id || null,
+        }));
+
+        const mfgOptions = lookups.manufacturers.map((m) => ({ id: m.id, value: m.name }));
+        const distOptions = lookups.distributors.map((d) => ({ id: d.id, value: d.name }));
+        const unitOptions = [{ id: "", value: "(none)" }].concat(
+            lookups.units.map((u) => ({ id: u.id, value: u.name + " (" + u.symbol + ")" }))
+        );
+        const prefixOptions = [{ id: "", value: "(none)" }].concat(
+            lookups.prefixes.map((p) => ({ id: p.id, value: p.symbol + " — " + p.prefix }))
+        );
+        const valueTypeOptions = [{ id: "numeric", value: "numeric" }, { id: "string", value: "string" }];
+        const opOptions = [
+            { id: "=", value: "=" },
+            { id: "!=", value: "≠" },
+            { id: "<", value: "<" },
+            { id: "<=", value: "≤" },
+            { id: ">", value: ">" },
+            { id: ">=", value: "≥" },
+            { id: "like", value: "like" },
+        ];
+
+        // Pre-built lookup maps keyed by stringified id — Webix's richselect
+        // editor returns the option's id back into the row, but the type
+        // (string vs number) is not stable across edits. Doing String(...)
+        // on both sides of the lookup makes the cell render reliably.
+        const mfgNameById = new Map(lookups.manufacturers.map((m) => [String(m.id), m.name]));
+        const distNameById = new Map(lookups.distributors.map((d) => [String(d.id), d.name]));
+        const unitLabelById = new Map(lookups.units.map((u) => [String(u.id), u.name + " (" + u.symbol + ")"]));
+        const prefixSymbolById = new Map(lookups.prefixes.map((p) => [String(p.id), p.symbol]));
+
+        const initial = {
+            name: seed.name || "",
+            description: seed.description || "",
+            internal_part_number: seed.internal_part_number || "",
+            comment: seed.comment || "",
+            category_id: seed.category_id || (categoryOptions[0] && categoryOptions[0].id) || null,
+            footprint_id: seed.footprint_id || null,
+            storage_location_id: seed.storage_location_id || null,
+            part_unit_id: seed.part_unit_id || (partUnitOptions[0] && partUnitOptions[0].id) || null,
+            min_stock_level: seed.min_stock_level || 0,
+            status: seed.status || "",
+            part_condition: seed.part_condition || "",
+            production_remarks: seed.production_remarks || "",
+            needs_review: !!seed.needs_review,
+            meta_part: !!seed.meta_part,
+        };
+
+        const titleText =
+            mode === "edit" ? `Edit part: ${escapeHtml(seed.name)}` :
+            mode === "duplicate" ? `Duplicate from: ${escapeHtml(currentPart.name)}` :
+            opts.metaPart ? "New meta-part" :
+            "New part";
+
+        webix.ui({
+            view: "window",
+            id: "pk-editor",
+            modal: true,
+            position: "center",
+            width: 820,
+            height: 620,
+            css: "pk-editor-window",
+            head: titleText,
+            body: {
+                view: "form",
+                id: "pk-editor-form",
+                elements: [
+                    {
+                        view: "tabview",
+                        cells: [
+                            {
+                                header: "Identity",
+                                body: {
+                                    rows: [
+                                        { view: "text", name: "name", label: "Name", labelWidth: 130, required: true },
+                                        { view: "text", name: "internal_part_number", label: "IPN", labelWidth: 130 },
+                                        { view: "textarea", name: "description", label: "Description", labelWidth: 130, height: 60 },
+                                        { view: "textarea", name: "comment", label: "Comment", labelWidth: 130, height: 60 },
+                                        { view: "text", name: "status", label: "Status", labelWidth: 130 },
+                                        { view: "text", name: "part_condition", label: "Condition", labelWidth: 130 },
+                                        { view: "textarea", name: "production_remarks", label: "Production remarks", labelWidth: 130, height: 50 },
+                                        {
+                                            cols: [
+                                                { view: "checkbox", name: "needs_review", labelRight: "Needs review", labelWidth: 130, width: 280 },
+                                                { view: "checkbox", name: "meta_part", labelRight: "Meta-part", labelWidth: 0, width: 200 },
+                                                {},
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                header: "Classification",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "richselect",
+                                            name: "category_id",
+                                            label: "Category",
+                                            labelWidth: 130,
+                                            options: { data: categoryOptions, body: { template: "#value#" } },
+                                        },
+                                        {
+                                            view: "richselect",
+                                            name: "footprint_id",
+                                            label: "Footprint",
+                                            labelWidth: 130,
+                                            options: footprintOptions,
+                                        },
+                                        {
+                                            view: "richselect",
+                                            name: "storage_location_id",
+                                            label: "Storage location",
+                                            labelWidth: 130,
+                                            options: storageOptions,
+                                        },
+                                        {
+                                            view: "richselect",
+                                            name: "part_unit_id",
+                                            label: "Part unit",
+                                            labelWidth: 130,
+                                            options: partUnitOptions,
+                                        },
+                                        { view: "counter", name: "min_stock_level", label: "Min stock", labelWidth: 130, value: 0, min: 0 },
+                                        {},
+                                    ],
+                                },
+                            },
+                            {
+                                header: "Manufacturers",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-mfgs") },
+                                                { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-mfgs") },
+                                                {},
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-mfgs",
+                                            editable: true,
+                                            editaction: "click",
+                                            select: "row",
+                                            data: mfgRows,
+                                            columns: [
+                                                {
+                                                    id: "manufacturer_id",
+                                                    header: "Manufacturer",
+                                                    width: 280,
+                                                    editor: "richselect",
+                                                    options: mfgOptions,
+                                                    template: function (o) {
+                                                        const name = mfgNameById.get(String(o.manufacturer_id));
+                                                        return name ? escapeHtml(name) : '<span class="pk-pick-prompt">— pick —</span>';
+                                                    },
+                                                },
+                                                { id: "part_number", header: "MPN", fillspace: true, editor: "text" },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                header: "Distributors",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-dists", { packaging_unit: 1 }) },
+                                                { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-dists") },
+                                                {},
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-dists",
+                                            editable: true,
+                                            editaction: "click",
+                                            select: "row",
+                                            data: distRows,
+                                            columns: [
+                                                {
+                                                    id: "distributor_id",
+                                                    header: "Distributor",
+                                                    width: 200,
+                                                    editor: "richselect",
+                                                    options: distOptions,
+                                                    template: function (o) {
+                                                        const name = distNameById.get(String(o.distributor_id));
+                                                        return name ? escapeHtml(name) : '<span class="pk-pick-prompt">— pick —</span>';
+                                                    },
+                                                },
+                                                { id: "order_number", header: "Order #", width: 130, editor: "text" },
+                                                { id: "price", header: "Price", width: 80, editor: "text", css: "pk-numeric" },
+                                                { id: "currency", header: "Cur", width: 60, editor: "text" },
+                                                { id: "sku", header: "SKU", width: 100, editor: "text" },
+                                                { id: "packaging_unit", header: "Pkg", width: 70, editor: "text", css: "pk-numeric" },
+                                                {
+                                                    id: "ignore_for_reports",
+                                                    header: "Skip",
+                                                    width: 50,
+                                                    template: "{common.checkbox()}",
+                                                    checkValue: true,
+                                                    uncheckValue: false,
+                                                },
+                                            ],
+                                            on: {
+                                                onCheck: function (rowId, _colId, state) {
+                                                    const row = this.getItem(rowId);
+                                                    if (row) row.ignore_for_reports = state;
+                                                },
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                header: "Criteria",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-criteria", { value_type: "numeric", op: "=" }) },
+                                                { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-criteria") },
+                                                {},
+                                                { view: "label", label: '<span class="pk-help-hint">Match real parts whose parameters satisfy ALL these predicates · only used when "Meta-part" is checked</span>' },
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-criteria",
+                                            editable: true,
+                                            editaction: "click",
+                                            select: "row",
+                                            data: criteriaRows,
+                                            columns: [
+                                                { id: "name", header: "Parameter", width: 160, editor: "text" },
+                                                {
+                                                    id: "op",
+                                                    header: "Op",
+                                                    width: 70,
+                                                    editor: "richselect",
+                                                    options: opOptions,
+                                                },
+                                                {
+                                                    id: "value_type",
+                                                    header: "Type",
+                                                    width: 90,
+                                                    editor: "richselect",
+                                                    options: valueTypeOptions,
+                                                },
+                                                { id: "value", header: "Value", width: 90, editor: "text", css: "pk-numeric" },
+                                                {
+                                                    id: "si_prefix_id",
+                                                    header: "Prefix",
+                                                    width: 100,
+                                                    editor: "richselect",
+                                                    options: prefixOptions,
+                                                    template: function (o) {
+                                                        if (!o.si_prefix_id) return "";
+                                                        const sym = prefixSymbolById.get(String(o.si_prefix_id));
+                                                        return sym ? escapeHtml(sym) : "";
+                                                    },
+                                                },
+                                                {
+                                                    id: "unit_id",
+                                                    header: "Unit",
+                                                    width: 130,
+                                                    editor: "richselect",
+                                                    options: unitOptions,
+                                                    template: function (o) {
+                                                        if (!o.unit_id) return "";
+                                                        const label = unitLabelById.get(String(o.unit_id));
+                                                        return label ? escapeHtml(label) : "";
+                                                    },
+                                                },
+                                                { id: "string_value", header: "String value", fillspace: true, editor: "text" },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                header: "Parameters",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-params", { value_type: "numeric" }) },
+                                                { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-params") },
+                                                {},
+                                                { view: "label", label: '<span class="pk-help-hint">Numeric: fill Value + Unit + Prefix · String: fill String value</span>' },
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-params",
+                                            editable: true,
+                                            editaction: "click",
+                                            select: "row",
+                                            data: paramRows,
+                                            columns: [
+                                                { id: "name", header: "Name", width: 160, editor: "text" },
+                                                {
+                                                    id: "value_type",
+                                                    header: "Type",
+                                                    width: 90,
+                                                    editor: "richselect",
+                                                    options: valueTypeOptions,
+                                                },
+                                                { id: "value", header: "Value", width: 100, editor: "text", css: "pk-numeric" },
+                                                {
+                                                    id: "si_prefix_id",
+                                                    header: "Prefix",
+                                                    width: 110,
+                                                    editor: "richselect",
+                                                    options: prefixOptions,
+                                                    template: function (o) {
+                                                        if (!o.si_prefix_id) return "";
+                                                        const sym = prefixSymbolById.get(String(o.si_prefix_id));
+                                                        return sym ? escapeHtml(sym) : "";
+                                                    },
+                                                },
+                                                {
+                                                    id: "unit_id",
+                                                    header: "Unit",
+                                                    width: 130,
+                                                    editor: "richselect",
+                                                    options: unitOptions,
+                                                    template: function (o) {
+                                                        if (!o.unit_id) return "";
+                                                        const label = unitLabelById.get(String(o.unit_id));
+                                                        return label ? escapeHtml(label) : "";
+                                                    },
+                                                },
+                                                { id: "string_value", header: "String value", fillspace: true, editor: "text" },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$("pk-editor").close() },
+                            {
+                                view: "button",
+                                value: mode === "edit" ? "Save" : "Create",
+                                width: 110,
+                                css: mode === "edit" ? "webix_primary" : "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: () => submitPartEditor(mode === "edit" ? "edit" : "new"),
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-editor-form").setValues(initial);
+    }
+
+    async function submitPartEditor(mode) {
+        const form = $$("pk-editor-form");
+        if (!form.validate()) {
+            webix.message({ type: "error", text: "Name is required." });
+            return;
+        }
+        const v = form.getValues();
+        // Coerce richselect ids to int, empty strings to null.
+        const idOrNull = (x) => (x === "" || x == null ? null : parseInt(x, 10));
+        const body = {
+            name: v.name.trim(),
+            description: (v.description || "").trim() || null,
+            internal_part_number: (v.internal_part_number || "").trim() || null,
+            comment: (v.comment || "").trim(),
+            status: (v.status || "").trim() || null,
+            part_condition: (v.part_condition || "").trim() || null,
+            production_remarks: (v.production_remarks || "").trim() || null,
+            needs_review: !!v.needs_review,
+            meta_part: !!v.meta_part,
+            min_stock_level: parseInt(v.min_stock_level, 10) || 0,
+            category_id: idOrNull(v.category_id),
+            footprint_id: idOrNull(v.footprint_id),
+            storage_location_id: idOrNull(v.storage_location_id),
+            part_unit_id: idOrNull(v.part_unit_id),
+        };
+
+        // Sub-tables: gather rows. Drop rows missing a required FK
+        // (manufacturer_id / distributor_id / param name) so half-typed
+        // rows don't poison the save.
+        const mfgGrid = $$("pk-edit-mfgs");
+        body.manufacturers = mfgGrid
+            ? mfgGrid.serialize()
+                .filter((r) => r.manufacturer_id)
+                .map((r) => ({
+                    manufacturer_id: parseInt(r.manufacturer_id, 10),
+                    part_number: (r.part_number || "").trim() || null,
+                }))
+            : [];
+        const distGrid = $$("pk-edit-dists");
+        body.distributors = distGrid
+            ? distGrid.serialize()
+                .filter((r) => r.distributor_id)
+                .map((r) => ({
+                    distributor_id: parseInt(r.distributor_id, 10),
+                    order_number: (r.order_number || "").trim() || null,
+                    price: r.price !== "" && r.price != null ? String(r.price) : null,
+                    currency: (r.currency || "").trim() || null,
+                    sku: (r.sku || "").trim() || null,
+                    packaging_unit: parseInt(r.packaging_unit, 10) || 1,
+                    ignore_for_reports: !!r.ignore_for_reports,
+                }))
+            : [];
+        const paramGrid = $$("pk-edit-params");
+        body.parameters = paramGrid
+            ? paramGrid.serialize()
+                .filter((r) => (r.name || "").trim())
+                .map((r) => ({
+                    name: r.name.trim(),
+                    description: (r.description || "").trim(),
+                    value_type: r.value_type === "string" ? "string" : "numeric",
+                    value: r.value !== "" && r.value != null && !isNaN(parseFloat(r.value))
+                        ? parseFloat(r.value)
+                        : null,
+                    string_value: (r.string_value || "").trim(),
+                    minimum_value: null,
+                    maximum_value: null,
+                    unit_id: r.unit_id ? parseInt(r.unit_id, 10) : null,
+                    si_prefix_id: r.si_prefix_id ? parseInt(r.si_prefix_id, 10) : null,
+                    min_si_prefix_id: null,
+                    max_si_prefix_id: null,
+                }))
+            : [];
+        const criteriaGrid = $$("pk-edit-criteria");
+        body.criteria = criteriaGrid
+            ? criteriaGrid.serialize()
+                .filter((r) => (r.name || "").trim())
+                .map((r) => ({
+                    name: r.name.trim(),
+                    op: r.op || "=",
+                    value_type: r.value_type === "string" ? "string" : "numeric",
+                    value: r.value !== "" && r.value != null && !isNaN(parseFloat(r.value))
+                        ? parseFloat(r.value)
+                        : null,
+                    string_value: (r.string_value || "").trim() || null,
+                    unit_id: r.unit_id ? parseInt(r.unit_id, 10) : null,
+                    si_prefix_id: r.si_prefix_id ? parseInt(r.si_prefix_id, 10) : null,
+                }))
+            : [];
+        try {
+            let savedId;
+            if (mode === "edit") {
+                await api.updatePart(currentPart.id, body);
+                savedId = currentPart.id;
+            } else {
+                const result = await api.createPart(body);
+                savedId = result.id;
+            }
+            $$("pk-editor").close();
+            await loadParts({});
+            // Re-select the saved part so detail refreshes too.
+            const grid = $$("pk-parts-grid");
+            if (grid && savedId != null && grid.exists(savedId)) {
+                grid.select(savedId);
+                grid.showItem(savedId);
+            } else if (savedId != null) {
+                await loadPartDetail(savedId);
+            }
+            webix.message({ text: mode === "edit" ? "Part saved" : "Part created", type: "success" });
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+        }
+    }
+
+    // ============================================================
+    //  Delete part
+    // ============================================================
+
+    function openDeleteDialog() {
+        if (!currentPart) return;
+        const name = escapeHtml(currentPart.name);
+        const ipn = currentPart.internal_part_number
+            ? ` <span class="pk-detail-ipn">${escapeHtml(currentPart.internal_part_number)}</span>`
+            : "";
+        webix.confirm({
+            title: "Delete part",
+            ok: "Delete",
+            cancel: "Cancel",
+            type: "confirm-error",
+            text:
+                `<div style="text-align:left">Delete <b>${name}</b>${ipn}?<br><br>` +
+                `Stock history is preserved. Project run history (if any) blocks this — ` +
+                `the backend will refuse and the part stays in place.</div>`,
+            callback: async function (result) {
+                if (!result) return;
+                try {
+                    await api.deletePart(currentPart.id);
+                    webix.message({ text: `Deleted ${currentPart.name}`, type: "success" });
+                    // Clear detail, hide actions, reload grid.
+                    currentPart = null;
+                    $$("pk-detail").setHTML('<div class="pk-detail-empty">Select a part to view detail.</div>');
+                    $$("pk-detail-actions").hide();
+                    await loadParts({});
+                } catch (e) {
+                    console.error(e);
+                    webix.message({
+                        type: "error",
+                        text: e.message && e.message.includes("400")
+                            ? "Cannot delete: part is referenced by project runs."
+                            : "Delete failed: " + (e.message || e),
+                    });
+                }
+            },
+        });
     }
 
     // ============================================================
