@@ -1,6 +1,9 @@
 /* partkeepr-ng — Webix overrides + custom rules. */
 
-/* App header — sits above Webix's chrome so we can put login/user stuff there. */
+/* =================================================================
+   App header
+   ================================================================= */
+
 .pk-header {
     background: #2a3f54;
     color: #f0f4f7;
@@ -38,7 +41,185 @@
     letter-spacing: 0.5px;
 }
 
-/* Login window — center it on a clean backdrop. */
+/* =================================================================
+   Pane toolbars (Categories / Parts / Detail headings above each pane)
+   ================================================================= */
+
+.pk-pane-toolbar {
+    background: #ecf0f3 !important;
+    border-bottom: 1px solid #c8d0d6 !important;
+}
+
+.pk-pane-title {
+    font-weight: 600;
+    font-size: 12px;
+    color: #4a5b6a;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+/* =================================================================
+   Category tree
+   ================================================================= */
+
+.pk-cat-name {
+    /* nothing special; placeholder if we want to tweak */
+}
+
+.pk-cat-count {
+    background: #d6e1ec;
+    color: #4a5b6a;
+    border-radius: 8px;
+    padding: 0 6px;
+    font-size: 10px;
+    margin-left: 6px;
+    font-weight: 600;
+}
+
+/* =================================================================
+   Parts grid
+   ================================================================= */
+
+.pk-grid .webix_column.pk-numeric,
+.pk-grid .pk-numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.pk-grid .pk-th-numeric .webix_hcell {
+    text-align: right;
+}
+
+.pk-status-bar {
+    background: #f3f5f7 !important;
+    border-top: 1px solid #d8dde2 !important;
+    color: #4a5b6a !important;
+    font-size: 11px !important;
+    padding: 0 8px !important;
+}
+
+/* =================================================================
+   Detail pane
+   ================================================================= */
+
+.pk-detail-empty {
+    padding: 20px;
+    color: #7a8794;
+    font-style: italic;
+}
+
+.pk-detail-section {
+    border-bottom: 1px solid #e3e7ea;
+    padding: 10px 12px;
+}
+
+.pk-detail-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #5a6b7a;
+    margin-bottom: 6px;
+}
+
+.pk-detail-header .pk-detail-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2933;
+    margin-bottom: 4px;
+}
+
+.pk-detail-ipn {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: #6a7a8a;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.pk-detail-meta-tag {
+    background: #884ea0;
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pk-detail-low-stock {
+    background: #c0392b;
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pk-detail-desc {
+    color: #4a5b6a;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.pk-detail-kv {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.pk-detail-kv th {
+    text-align: left;
+    color: #6a7a8a;
+    font-weight: 500;
+    padding: 2px 8px 2px 0;
+    width: 100px;
+    vertical-align: top;
+}
+
+.pk-detail-kv td {
+    color: #1f2933;
+    padding: 2px 0;
+    word-break: break-word;
+}
+
+.pk-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.pk-detail-table th {
+    text-align: left;
+    background: #f7f9fa;
+    color: #4a5b6a;
+    font-weight: 600;
+    border-bottom: 1px solid #d8dde2;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+.pk-detail-table td {
+    border-bottom: 1px solid #eef1f3;
+    padding: 3px 6px;
+    color: #1f2933;
+}
+
+.pk-detail-table .pk-numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.pk-stock-add { color: #1e7e34; font-weight: 600; }
+.pk-stock-remove { color: #b03030; font-weight: 600; }
+
+/* =================================================================
+   Login window
+   ================================================================= */
+
 .pk-login-window .webix_win_head {
     background: #2a3f54;
     color: #fff;
