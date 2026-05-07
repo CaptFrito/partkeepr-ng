@@ -229,6 +229,19 @@
     font-style: italic;
 }
 
+.pk-dialog-hint {
+    color: #4a5b6a;
+    font-size: 12px;
+    padding: 6px 12px;
+    background: #f7f9fa;
+    border-bottom: 1px solid #e0e6ec;
+}
+
+.pk-dialog-actions {
+    background: #f3f5f7 !important;
+    border-top: 1px solid #d8dde2 !important;
+}
+
 /* =================================================================
    Detail action toolbar (Add stock / Remove / Reconcile)
    ================================================================= */

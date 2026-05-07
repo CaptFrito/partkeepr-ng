@@ -58,6 +58,47 @@
             if (!r.ok) throw new Error(`footprint tree failed: ${r.status}`);
             return r.json();
         },
+        async createPartCategory(body) {
+            const r = await fetch("/api/part_categories", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create category failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updatePartCategory(id, body) {
+            const r = await fetch(`/api/part_categories/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update category failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deletePartCategory(id) {
+            const r = await fetch(`/api/part_categories/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete category failed: ${r.status} ${await r.text()}`);
+        },
+        async movePartCategory(id, newParentId) {
+            const r = await fetch(`/api/part_categories/${id}/move`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ new_parent_id: newParentId }),
+            });
+            if (!r.ok) throw new Error(`move category failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async partCategoryById(id) {
+            // No GET-by-id endpoint; the tree returns only name/path. We
+            // need the description for the edit dialog, so fetch from a
+            // helper endpoint. If it doesn't exist, fall back to "" — the
+            // backend update accepts an empty description.
+            const r = await fetch("/api/part_categories");
+            if (!r.ok) return null;
+            const flat = await r.json();
+            return flat.find((c) => c.id === id) || null;
+        },
         async part(id) {
             const r = await fetch("/api/parts/" + id);
             if (!r.ok) throw new Error(`part ${id} failed: ${r.status}`);
@@ -287,7 +328,10 @@
                     view: "multiview",
                     id: "pk-left-multiview",
                     cells: [
-                        { id: "tab-categories", rows: [buildCategoryTreeView()] },
+                        {
+                            id: "tab-categories",
+                            rows: [buildCategoryActionToolbar(), buildCategoryTreeView()],
+                        },
                         { id: "tab-storage", rows: [buildStorageTreeView()] },
                         { id: "tab-footprints", rows: [buildFootprintTreeView()] },
                         { id: "tab-lookups", rows: [buildLookupsStub()] },
@@ -356,6 +400,267 @@
             out.open = node.lvl === 0;
         }
         return out;
+    }
+
+    // --- Part-category CRUD toolbar + dialogs ---
+
+    function buildCategoryActionToolbar() {
+        return {
+            view: "toolbar",
+            css: "pk-pane-toolbar",
+            height: 38,
+            cols: [
+                { view: "button", value: "+ Sub", css: "pk-btn-add", width: 70, click: openCategoryAdd },
+                { view: "button", value: "✎ Edit", css: "webix_primary", width: 75, click: openCategoryEdit },
+                { view: "button", value: "Move…", width: 70, click: openCategoryMove },
+                { view: "button", value: "🗑", css: "pk-btn-remove", width: 40, click: confirmCategoryDelete },
+                {},
+            ],
+        };
+    }
+
+    function getSelectedTreeNode(treeId) {
+        const tree = $$(treeId);
+        if (!tree) return null;
+        const id = tree.getSelectedId();
+        if (!id) return null;
+        return tree.getItem(id);
+    }
+
+    async function reloadPartCategoryTreeAndGrid(reselectId) {
+        // Reload the tree, restoring selection if asked. Also refresh the
+        // parts grid since category counts may have shifted.
+        try {
+            const arr = await api.categoryTree();
+            const tree = $$("pk-cat-tree");
+            tree.clearAll();
+            tree.parse(arr.map(transformCategoryNode));
+            const target = reselectId != null ? String(reselectId) : (arr[0] ? String(arr[0].id) : null);
+            if (target && tree.exists(target)) {
+                tree.select(target);
+                tree.open(target);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        await loadParts({});
+    }
+
+    function openCategoryAdd() {
+        const sel = getSelectedTreeNode("pk-cat-tree");
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a parent category first." });
+            return;
+        }
+        showSimpleNameDescDialog({
+            title: `New sub-category under "${sel.name}"`,
+            saveLabel: "Create",
+            initial: { name: "", description: "" },
+            onSave: async (v) => {
+                await api.createPartCategory({
+                    parent_id: parseInt(sel.id, 10),
+                    name: v.name,
+                    description: v.description || null,
+                });
+                await reloadPartCategoryTreeAndGrid(sel.id);
+            },
+        });
+    }
+
+    async function openCategoryEdit() {
+        const sel = getSelectedTreeNode("pk-cat-tree");
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a category to edit." });
+            return;
+        }
+        if (sel.lvl === 0) {
+            webix.message({ type: "error", text: "The root category cannot be renamed." });
+            return;
+        }
+        const full = await api.partCategoryById(parseInt(sel.id, 10));
+        showSimpleNameDescDialog({
+            title: `Edit category "${sel.name}"`,
+            saveLabel: "Save",
+            initial: { name: sel.name, description: (full && full.description) || "" },
+            onSave: async (v) => {
+                await api.updatePartCategory(parseInt(sel.id, 10), {
+                    name: v.name,
+                    description: v.description || null,
+                });
+                await reloadPartCategoryTreeAndGrid(sel.id);
+            },
+        });
+    }
+
+    function confirmCategoryDelete() {
+        const sel = getSelectedTreeNode("pk-cat-tree");
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a category to delete." });
+            return;
+        }
+        if (sel.lvl === 0) {
+            webix.message({ type: "error", text: "The root category cannot be deleted." });
+            return;
+        }
+        webix.confirm({
+            title: "Delete category",
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text:
+                `Delete category <b>${escapeHtml(sel.name)}</b>?<br><br>` +
+                `Refused if the category contains parts or sub-categories.`,
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    await api.deletePartCategory(parseInt(sel.id, 10));
+                    await reloadPartCategoryTreeAndGrid();
+                    webix.message({ text: "Category deleted", type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function openCategoryMove() {
+        const sel = getSelectedTreeNode("pk-cat-tree");
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a category to move." });
+            return;
+        }
+        if (sel.lvl === 0) {
+            webix.message({ type: "error", text: "The root category cannot be moved." });
+            return;
+        }
+        showCategoryMoveDialog({
+            moving: sel,
+            onPick: async (newParentId) => {
+                await api.movePartCategory(parseInt(sel.id, 10), newParentId);
+                await reloadPartCategoryTreeAndGrid(sel.id);
+            },
+        });
+    }
+
+    // Generic add/edit dialog for nodes that have just (name, description).
+    function showSimpleNameDescDialog(opts) {
+        webix.ui({
+            view: "window",
+            id: "pk-edit-namedesc",
+            modal: true,
+            position: "center",
+            width: 440,
+            head: opts.title,
+            body: {
+                view: "form",
+                id: "pk-edit-namedesc-form",
+                elements: [
+                    { view: "text", name: "name", label: "Name", labelWidth: 110, required: true },
+                    { view: "textarea", name: "description", label: "Description", labelWidth: 110, height: 80 },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-edit-namedesc").close() },
+                            {
+                                view: "button",
+                                value: opts.saveLabel || "Save",
+                                width: 100,
+                                css: "webix_primary",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-edit-namedesc-form").getValues();
+                                    if (!v.name || !v.name.trim()) {
+                                        webix.message({ type: "error", text: "Name is required" });
+                                        return;
+                                    }
+                                    try {
+                                        await opts.onSave({ name: v.name.trim(), description: (v.description || "").trim() });
+                                        $$("pk-edit-namedesc").close();
+                                        webix.message({ text: "Saved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-edit-namedesc-form").setValues(opts.initial || { name: "", description: "" });
+    }
+
+    // Move-to picker for the part-category tree.
+    function showCategoryMoveDialog(opts) {
+        const movingId = String(opts.moving.id);
+
+        function exclude(arr, id) {
+            return arr
+                .filter((n) => String(n.id) !== id)
+                .map((n) => Object.assign({}, n, {
+                    children: n.children ? exclude(n.children, id) : [],
+                }));
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-cat-move",
+            modal: true,
+            position: "center",
+            width: 460,
+            height: 560,
+            head: `Move "${opts.moving.name}" to…`,
+            body: {
+                rows: [
+                    { template: "Pick a new parent category:", height: 32, css: "pk-dialog-hint", borderless: true },
+                    {
+                        view: "tree",
+                        id: "pk-cat-move-tree",
+                        select: true,
+                        template: treeNodeTemplate,
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 48,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-cat-move").close() },
+                            {
+                                view: "button",
+                                value: "Move",
+                                width: 90,
+                                css: "webix_primary",
+                                click: async function () {
+                                    const tree = $$("pk-cat-move-tree");
+                                    const targetId = tree.getSelectedId();
+                                    if (!targetId) {
+                                        webix.message({ type: "error", text: "Pick a target parent" });
+                                        return;
+                                    }
+                                    try {
+                                        await opts.onPick(parseInt(targetId, 10));
+                                        $$("pk-cat-move").close();
+                                        webix.message({ text: "Moved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Move failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        api.categoryTree().then((arr) => {
+            const cleaned = exclude(arr, movingId);
+            const tree = $$("pk-cat-move-tree");
+            tree.clearAll();
+            tree.parse(cleaned.map(transformCategoryNode));
+            // Open root
+            if (cleaned.length) tree.open(String(cleaned[0].id));
+        });
     }
 
     // --- Storage tree (categories + locations as leaves) ---
