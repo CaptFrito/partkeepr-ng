@@ -5495,6 +5495,226 @@
         if (sel) table.remove(sel);
     }
 
+    // ============================================================
+    //  Common Parameters library — built-in EE template list
+    //
+    //  Each entry maps a familiar identifier (R, C, L, Vmax, etc.)
+    //  to a parameter shape: numeric vs string, unit symbol, default
+    //  prefix. Unit and prefix symbols are resolved against the
+    //  install's lookupsCache at insertion time — if the install
+    //  doesn't have a unit with that symbol the row falls back to
+    //  unit_id=null and the operator can pick one manually.
+    //
+    //  Library is additive — operators can also type free-form names
+    //  in the parameter editor; we never auto-detect or auto-type
+    //  parameters from a part's data because plenty of parts aren't
+    //  electrical.
+    // ============================================================
+
+    const COMMON_PARAMETERS = [
+        // Passives — primary value
+        { group: "Passives",      name: "C",          description: "Capacitance",           type: "numeric", unit: "F",  prefix: "μ"  },
+        { group: "Passives",      name: "R",          description: "Resistance",            type: "numeric", unit: "Ω",  prefix: "k"  },
+        { group: "Passives",      name: "L",          description: "Inductance",            type: "numeric", unit: "H",  prefix: "μ"  },
+        { group: "Passives",      name: "Q",          description: "Quality factor",        type: "numeric", unit: "",   prefix: ""   },
+        { group: "Passives",      name: "ESR",        description: "Equivalent series resistance", type: "numeric", unit: "Ω", prefix: "m" },
+        // Voltage / current / power
+        { group: "V/I/P",         name: "Vdc",        description: "DC voltage",            type: "numeric", unit: "V",  prefix: ""   },
+        { group: "V/I/P",         name: "Vac",        description: "AC voltage (RMS)",      type: "numeric", unit: "V",  prefix: ""   },
+        { group: "V/I/P",         name: "Vmax",       description: "Maximum voltage rating",type: "numeric", unit: "V",  prefix: ""   },
+        { group: "V/I/P",         name: "Vf",         description: "Forward voltage",       type: "numeric", unit: "V",  prefix: ""   },
+        { group: "V/I/P",         name: "Idc",        description: "DC current",            type: "numeric", unit: "A",  prefix: "m"  },
+        { group: "V/I/P",         name: "Iac",        description: "AC current",            type: "numeric", unit: "A",  prefix: "m"  },
+        { group: "V/I/P",         name: "Imax",       description: "Maximum current rating",type: "numeric", unit: "A",  prefix: "m"  },
+        { group: "V/I/P",         name: "P",          description: "Power rating",          type: "numeric", unit: "W",  prefix: ""   },
+        { group: "V/I/P",         name: "Rds(on)",    description: "FET on-state resistance",type:"numeric", unit: "Ω",  prefix: "m"  },
+        // Frequency / timing
+        { group: "Timing",        name: "f",          description: "Frequency",             type: "numeric", unit: "Hz", prefix: "M"  },
+        { group: "Timing",        name: "fmin",       description: "Minimum frequency",     type: "numeric", unit: "Hz", prefix: "M"  },
+        { group: "Timing",        name: "fmax",       description: "Maximum frequency",     type: "numeric", unit: "Hz", prefix: "M"  },
+        { group: "Timing",        name: "tr",         description: "Rise time",             type: "numeric", unit: "s",  prefix: "n"  },
+        { group: "Timing",        name: "tf",         description: "Fall time",             type: "numeric", unit: "s",  prefix: "n"  },
+        // Temperature
+        { group: "Temperature",   name: "Tmin",       description: "Min operating temperature", type: "numeric", unit: "°C", prefix: "" },
+        { group: "Temperature",   name: "Tmax",       description: "Max operating temperature", type: "numeric", unit: "°C", prefix: "" },
+        { group: "Temperature",   name: "Top",        description: "Operating temperature", type: "numeric", unit: "°C", prefix: ""   },
+        // Tolerance
+        { group: "Tolerance",     name: "Tol",        description: "Tolerance",             type: "numeric", unit: "%",  prefix: ""   },
+        { group: "Tolerance",     name: "Tol+",       description: "Positive tolerance",    type: "numeric", unit: "%",  prefix: ""   },
+        { group: "Tolerance",     name: "Tol-",       description: "Negative tolerance",    type: "numeric", unit: "%",  prefix: ""   },
+        // Generic strings
+        { group: "Generic",       name: "Package",    description: "Physical package",      type: "string"   },
+        { group: "Generic",       name: "Dielectric", description: "Capacitor dielectric (X7R, NP0…)",  type: "string" },
+        { group: "Generic",       name: "Material",   description: "Material",              type: "string"   },
+        { group: "Generic",       name: "Color",      description: "Color",                 type: "string"   },
+        { group: "Generic",       name: "Mount",      description: "Mount type (SMD / THT)",type: "string"   },
+    ];
+
+    function commonParamLookupSymbol(list, sym) {
+        if (!sym || !list) return null;
+        const found = list.find((x) => x.symbol === sym);
+        return found ? found.id : null;
+    }
+
+    /// Translate a COMMON_PARAMETERS entry to a row shape compatible
+    /// with the parameter / criteria editor datatables. Resolves
+    /// unit/prefix symbols against lookupsCache.
+    function commonParamToRow(entry) {
+        const unit_id = entry.unit
+            ? commonParamLookupSymbol(lookupsCache && lookupsCache.units, entry.unit)
+            : null;
+        const si_prefix_id = entry.prefix
+            ? commonParamLookupSymbol(lookupsCache && lookupsCache.prefixes, entry.prefix)
+            : null;
+        return {
+            id: webix.uid(),
+            name: entry.name,
+            description: entry.description || "",
+            value_type: entry.type === "string" ? "string" : "numeric",
+            value: "",
+            string_value: "",
+            unit_id: unit_id,
+            si_prefix_id: si_prefix_id,
+            // criteria editor adds an `op` column too — let
+            // editorAddRow's per-call defaults supply that.
+        };
+    }
+
+    /// Open the templates picker. `targetTableId` is the datatable
+    /// receiving new rows (pk-edit-params or pk-edit-criteria).
+    /// `extraDefaults` is merged into each new row (used by criteria
+    /// editor to set op="=").
+    function openCommonParamsDialog(targetTableId, extraDefaults) {
+        // Lookups should already be loaded — the part editor
+        // depends on them too. If not, surface the failure.
+        if (!lookupsCache) {
+            webix.message({ type: "error", text: "Lookup data not loaded yet." });
+            return;
+        }
+        // Annotate each library entry with the live install's
+        // unit/prefix labels so the operator can see what they'll
+        // get — including the "(install lacks unit X)" case.
+        const annotated = COMMON_PARAMETERS.map((p) => {
+            let unitLabel = "—", unitOk = true;
+            if (p.unit) {
+                const u = lookupsCache.units.find((x) => x.symbol === p.unit);
+                if (u) unitLabel = p.unit;
+                else { unitLabel = `${p.unit} (missing)`; unitOk = false; }
+            } else if (p.type === "string") {
+                unitLabel = "(string)";
+            }
+            let prefLabel = "";
+            if (p.prefix) {
+                const pf = lookupsCache.prefixes.find((x) => x.symbol === p.prefix);
+                prefLabel = pf ? p.prefix : `${p.prefix}?`;
+            }
+            return Object.assign({ id: "tpl_" + p.name, _ok: unitOk, _unit: unitLabel, _prefix: prefLabel }, p);
+        });
+
+        webix.ui({
+            view: "window",
+            id: "pk-common-params",
+            modal: true,
+            position: "center",
+            width: 720,
+            height: 540,
+            head: "Common Parameter Templates",
+            body: {
+                rows: [
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 40,
+                        cols: [
+                            { view: "label", label: "Filter:", width: 60, css: "pk-pane-title" },
+                            {
+                                view: "search",
+                                id: "pk-common-params-filter",
+                                placeholder: "name or description…",
+                                width: 280,
+                                on: {
+                                    onTimedKeyPress: function () {
+                                        const q = (this.getValue() || "").toLowerCase().trim();
+                                        const dt = $$("pk-common-params-grid");
+                                        if (!dt) return;
+                                        if (!q) { dt.filter(); return; }
+                                        dt.filter((row) => {
+                                            return (row.name || "").toLowerCase().includes(q)
+                                                || (row.description || "").toLowerCase().includes(q)
+                                                || (row.group || "").toLowerCase().includes(q);
+                                        });
+                                    },
+                                },
+                            },
+                            {},
+                            { view: "label", label: '<span class="pk-help-hint">Ctrl/Shift+click for multi-select · "(missing)" = this install lacks that unit</span>' },
+                        ],
+                    },
+                    {
+                        view: "datatable",
+                        id: "pk-common-params-grid",
+                        css: "pk-grid",
+                        select: "row",
+                        multiselect: true,
+                        data: annotated,
+                        columns: [
+                            { id: "group", header: "Group", width: 110 },
+                            { id: "name", header: "Name", width: 100 },
+                            { id: "description", header: "Description", fillspace: true },
+                            { id: "type", header: "Type", width: 75 },
+                            {
+                                id: "_unit",
+                                header: "Unit",
+                                width: 110,
+                                template: function (o) {
+                                    if (o._unit && o._unit.includes("missing")) {
+                                        return `<span style="color:#b03030">${escapeHtml(o._unit)}</span>`;
+                                    }
+                                    return escapeHtml(o._unit || "");
+                                },
+                            },
+                            { id: "_prefix", header: "Prefix", width: 70 },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$("pk-common-params").close() },
+                            {
+                                view: "button",
+                                value: "+ Add selected",
+                                width: 160,
+                                css: "pk-btn-add",
+                                click: function () {
+                                    const dt = $$("pk-common-params-grid");
+                                    const sel = dt ? dt.getSelectedItem(true) : [];
+                                    const items = Array.isArray(sel) ? sel : (sel ? [sel] : []);
+                                    if (!items.length) {
+                                        webix.message({ type: "error", text: "Select at least one row" });
+                                        return;
+                                    }
+                                    const target = $$(targetTableId);
+                                    if (!target) return;
+                                    let added = 0;
+                                    for (const it of items) {
+                                        const row = Object.assign(commonParamToRow(it), extraDefaults || {});
+                                        target.add(row);
+                                        added++;
+                                    }
+                                    $$("pk-common-params").close();
+                                    webix.message({ type: "success", text: `Added ${added} parameter${added === 1 ? "" : "s"}` });
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+    }
+
 
     async function openPartEditor(mode, opts) {
         opts = opts || {};
@@ -5805,6 +6025,7 @@
                                             height: 32,
                                             cols: [
                                                 { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-criteria", { value_type: "numeric", op: "=" }) },
+                                                { view: "button", value: "📋 Templates", width: 110, click: () => openCommonParamsDialog("pk-edit-criteria", { op: "=" }) },
                                                 { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-criteria") },
                                                 {},
                                                 { view: "label", label: '<span class="pk-help-hint">Match real parts whose parameters satisfy ALL these predicates · only used when "Meta-part" is checked</span>' },
@@ -5883,6 +6104,7 @@
                                             height: 32,
                                             cols: [
                                                 { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100, click: () => editorAddRow("pk-edit-params", { value_type: "numeric" }) },
+                                                { view: "button", value: "📋 Templates", width: 110, click: () => openCommonParamsDialog("pk-edit-params") },
                                                 { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160, click: () => editorRemoveRow("pk-edit-params") },
                                                 {},
                                                 { view: "label", label: '<span class="pk-help-hint">Numeric: fill Value + Unit + Prefix · String: fill String value</span>' },
