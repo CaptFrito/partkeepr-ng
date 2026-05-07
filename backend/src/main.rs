@@ -1,10 +1,11 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Context;
-use axum::{extract::FromRef, http::Method, middleware, routing::get, Router};
+use axum::{extract::FromRef, middleware, routing::get, Router};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -65,40 +66,37 @@ async fn main() -> anyhow::Result<()> {
     let signer = SessionSigner::from_env()?;
     let state = AppState { pool, store, signer };
 
-    // Permissive CORS for local dev — frontend runs on :8081 (Trunk) while
-    // the API is on :8080. Tighten / restrict to specific origins when we
-    // leave localhost.
-    //
-    // `allow_credentials(true)` is required so the browser sends our
-    // session cookie on cross-origin XHR. With credentials, the spec
-    // also forbids `allow_origin(Any)` — must echo specific origins.
-    let cors = CorsLayer::new()
-        .allow_origin(["http://localhost:8081".parse().unwrap(),
-                       "http://127.0.0.1:8081".parse().unwrap()])
-        .allow_credentials(true)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::PATCH])
-        // Spec forbids `*` for headers when credentials are allowed.
-        // Echo the headers we actually use; add to this list when a
-        // new custom header lands.
-        .allow_headers([
-            axum::http::header::CONTENT_TYPE,
-            axum::http::header::ACCEPT,
-        ]);
+    // Frontend is served as static assets out of this directory. Default
+    // is "../frontend" relative to the backend cwd (matches the dev
+    // checkout layout). Production sets PARTKEEPR_FRONTEND_DIR to the
+    // installed location (e.g., /usr/share/partkeepr-ng/frontend).
+    let frontend_dir: PathBuf = std::env::var("PARTKEEPR_FRONTEND_DIR")
+        .unwrap_or_else(|_| "../frontend".to_string())
+        .into();
+    if !frontend_dir.exists() {
+        anyhow::bail!(
+            "frontend directory {:?} does not exist (set PARTKEEPR_FRONTEND_DIR \
+             or run from backend/ where ../frontend resolves)",
+            frontend_dir
+        );
+    }
+    tracing::info!(?frontend_dir, "serving static frontend");
 
     let app = Router::new()
         .route("/health", get(health))
         .merge(handlers::routes())
         .merge(models::routes())
         // Auth middleware runs ahead of every handler. Whitelisted
-        // public paths (/health, /api/login) pass through; everything
-        // else returns 401 unless the session cookie is present and
-        // valid. See handlers/auth.rs::auth_middleware.
+        // public paths (/health, /api/login) and any non-/api/, non-/files/
+        // path (i.e., static frontend assets) pass through; everything
+        // else returns 401 unless the session cookie is present and valid.
+        // See handlers/auth.rs::auth_middleware.
         .layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth::auth_middleware,
         ))
         .layer(TraceLayer::new_for_http())
-        .layer(cors)
+        .fallback_service(ServeDir::new(&frontend_dir))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;

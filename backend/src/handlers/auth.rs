@@ -348,9 +348,14 @@ pub async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // Slice 7 download paths sit under /files/{kind}/{id}; gating those
-    // behind auth is the whole point of slice 10. /files/* falls through
-    // to the auth check below.
+    // Static frontend assets (everything outside /api/* and /files/*) are
+    // served by tower-http's ServeDir fallback and don't require auth —
+    // the login page itself has to be reachable for the user to log in.
+    // /api/* routes always require auth (except /api/login above);
+    // /files/* (slice 7 attachment downloads) also requires auth.
+    if !path.starts_with("/api/") && !path.starts_with("/files/") {
+        return next.run(req).await;
+    }
 
     let cookie = jar.get(SESSION_COOKIE);
     match cookie.and_then(|c| signer.decode(c.value())) {
