@@ -3617,15 +3617,23 @@
                 fields: [
                     { kind: "text", name: "name", label: "Name", required: true },
                     { kind: "text", name: "symbol", label: "Symbol", required: true },
-                    // SI prefix M:M editing deferred — for now we send the
-                    // existing list back unchanged on update so we don't
-                    // wipe it out.
+                    {
+                        kind: "prefix_checkboxes",
+                        name: "allowed_prefix_ids",
+                        label: "SI prefixes allowed",
+                    },
                 ],
                 seed: existing || { name: "", symbol: "", allowed_prefix_ids: [] },
-                serialize: (v, existing) => ({
+                serialize: (v) => ({
                     name: v.name.trim(),
                     symbol: (v.symbol || "").trim(),
-                    allowed_prefix_ids: existing ? (existing.allowed_prefix_ids || []) : [],
+                    // The prefix_checkboxes field contributes one
+                    // _pfx_<id>:bool key per prefix; collect the truthy
+                    // ones back into the array shape the API expects.
+                    allowed_prefix_ids: Object.keys(v)
+                        .filter((k) => k.startsWith("_pfx_") && !!v[k])
+                        .map((k) => parseInt(k.slice(5), 10))
+                        .filter((n) => !isNaN(n)),
                 }),
             }),
         },
@@ -3726,12 +3734,15 @@
         return item || null;
     }
 
-    function openLookupAdd() {
+    async function openLookupAdd() {
         if (!currentLookupType) return;
         if (currentLookupType === "manufacturers") {
             openManufacturerEditor("new", null);
             return;
         }
+        // Units' edit dialog includes a prefix-checkbox grid that reads
+        // from lookupsCache.prefixes — guarantee it's loaded.
+        await ensureLookups();
         const cfg = LOOKUP_TYPES[currentLookupType];
         const ed = cfg.buildEdit(null);
         showLookupEditDialog({
@@ -3742,12 +3753,13 @@
             onSave: async (formValues) => {
                 const body = ed.serialize(formValues, null);
                 await api.lookupCreate(cfg.url, body);
+                lookupsCache = null;  // any cross-screen list (units, prefixes, etc.) is now stale
                 await showLookupType(currentLookupType);
             },
         });
     }
 
-    function openLookupEdit() {
+    async function openLookupEdit() {
         if (!currentLookupType) return;
         const sel = getSelectedLookupRow();
         if (!sel) {
@@ -3758,6 +3770,7 @@
             openManufacturerEditor("edit", sel);
             return;
         }
+        await ensureLookups();
         const cfg = LOOKUP_TYPES[currentLookupType];
         const ed = cfg.buildEdit(sel);
         showLookupEditDialog({
@@ -3768,6 +3781,7 @@
             onSave: async (formValues) => {
                 const body = ed.serialize(formValues, sel);
                 await api.lookupUpdate(cfg.url, sel.id, body);
+                lookupsCache = null;
                 await showLookupType(currentLookupType);
             },
         });
@@ -3914,17 +3928,59 @@
     }
 
     function showLookupEditDialog(opts) {
-        const formElements = opts.fields.map((f) => {
-            if (f.kind === "text") return { view: "text", name: f.name, label: f.label, labelWidth: 140, required: !!f.required };
-            if (f.kind === "textarea") return { view: "textarea", name: f.name, label: f.label, labelWidth: 140, height: f.height || 60 };
-            if (f.kind === "checkbox") return { view: "checkbox", name: f.name, labelRight: f.labelRight || f.label, labelWidth: 140 };
+        // Some fields (prefix_checkboxes) expand into multiple form
+        // elements rather than one, so flatMap, not map.
+        const formElements = opts.fields.flatMap((f) => {
+            if (f.kind === "text") return [{ view: "text", name: f.name, label: f.label, labelWidth: 140, required: !!f.required }];
+            if (f.kind === "textarea") return [{ view: "textarea", name: f.name, label: f.label, labelWidth: 140, height: f.height || 60 }];
+            if (f.kind === "checkbox") return [{ view: "checkbox", name: f.name, labelRight: f.labelRight || f.label, labelWidth: 140 }];
             if (f.kind === "counter") {
                 const c = { view: "counter", name: f.name, label: f.label, labelWidth: 140, step: f.step || 1 };
                 if (f.min !== undefined) c.min = f.min;
                 if (f.max !== undefined) c.max = f.max;
-                return c;
+                return [c];
             }
-            return { view: "text", name: f.name, label: f.label, labelWidth: 140 };
+            if (f.kind === "prefix_checkboxes") {
+                // Render the full SI prefix list as a two-column grid
+                // of named checkboxes (`_pfx_<id>`). lookupsCache is
+                // guaranteed loaded by openLookupAdd/openLookupEdit.
+                const pfxs = ((lookupsCache && lookupsCache.prefixes) || [])
+                    .slice()
+                    .sort((a, b) => a.exponent - b.exponent);
+                if (pfxs.length === 0) {
+                    return [{ template: "(no SI prefixes defined)", borderless: true, height: 24, css: "pk-help-hint" }];
+                }
+                const renderRow = (p) => {
+                    const sym = escapeHtml(p.symbol || "");
+                    const pre = escapeHtml(p.prefix || "");
+                    const exp = `${p.base}<sup>${p.exponent}</sup>`;
+                    return {
+                        view: "checkbox",
+                        name: "_pfx_" + p.id,
+                        labelRight: `${sym} ${pre} (${exp})`,
+                        labelWidth: 0,
+                        height: 24,
+                    };
+                };
+                const half = Math.ceil(pfxs.length / 2);
+                const left = pfxs.slice(0, half).map(renderRow);
+                const right = pfxs.slice(half).map(renderRow);
+                return [
+                    {
+                        view: "template",
+                        template: `<div class="pk-detail-section-title">${escapeHtml(f.label)}</div>`,
+                        height: 24,
+                        borderless: true,
+                    },
+                    {
+                        cols: [
+                            { rows: left },
+                            { rows: right },
+                        ],
+                    },
+                ];
+            }
+            return [{ view: "text", name: f.name, label: f.label, labelWidth: 140 }];
         });
         formElements.push({
             cols: [
@@ -3956,16 +4012,34 @@
                 },
             ],
         });
+        // Some kinds expand a single seed key into many form fields —
+        // do that translation here so individual buildEdit configs
+        // don't have to know.
+        const expandedSeed = Object.assign({}, opts.seed);
+        for (const f of opts.fields) {
+            if (f.kind === "prefix_checkboxes") {
+                const ids = (expandedSeed[f.name] || []).map(Number);
+                for (const id of ids) expandedSeed["_pfx_" + id] = 1;
+                delete expandedSeed[f.name];
+            }
+        }
+
+        // Default size is fine for most lookups; bump for the unit
+        // editor's prefix grid.
+        const hasPrefixGrid = opts.fields.some((f) => f.kind === "prefix_checkboxes");
+        const winHeight = hasPrefixGrid ? 560 : null;
+
         webix.ui({
             view: "window",
             id: "pk-lookup-edit",
             modal: true,
             position: "center",
             width: 520,
+            ...(winHeight ? { height: winHeight } : {}),
             head: opts.title,
             body: { view: "form", id: "pk-lookup-edit-form", elements: formElements },
         }).show();
-        $$("pk-lookup-edit-form").setValues(opts.seed);
+        $$("pk-lookup-edit-form").setValues(expandedSeed);
     }
 
     async function loadParts(opts) {
