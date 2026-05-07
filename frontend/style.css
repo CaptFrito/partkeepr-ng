@@ -90,6 +90,21 @@
     text-align: right;
 }
 
+/* =================================================================
+   Datatable column header dividers — applies to every webix datatable
+   in the app (parts grid, lookups, attachments, projects, etc.).
+   The mini skin doesn't draw vertical separators between header cells,
+   which makes the resize hit-zones invisible. Subtle line is enough
+   to indicate "you can drag here."
+   ================================================================= */
+
+/* Mini skin sets `.webix_dtable .webix_ss_header .webix_hcell { border-color: transparent }`
+   — match its specificity to override just the right edge. */
+.webix_dtable .webix_ss_header .webix_hcell {
+    border-right-color: #b0b8be;
+}
+/* Last header in a row has its width zeroed by webix; nothing to do. */
+
 .pk-status-bar {
     background: #f3f5f7 !important;
     border-top: 1px solid #d8dde2 !important;
