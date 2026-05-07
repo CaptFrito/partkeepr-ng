@@ -21,6 +21,10 @@ pub enum AppError {
     /// this variant, but it's available for any future handler that
     /// needs to refuse based on the session.
     Unauthorized(&'static str),
+    /// 500 with a dynamic message. Used for handler-internal failures
+    /// (temp files, subprocess spawn, etc.) where there's no friendlier
+    /// shape than "something went wrong, here's the detail".
+    Internal(String),
     Db(sqlx::Error),
 }
 
@@ -54,6 +58,14 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "internal error"})),
+                )
+                    .into_response()
+            }
+            AppError::Internal(msg) => {
+                tracing::error!(%msg, "internal error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": msg})),
                 )
                     .into_response()
             }

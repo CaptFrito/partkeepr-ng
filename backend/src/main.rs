@@ -25,6 +25,7 @@ pub struct AppState {
     pub pool: MySqlPool,
     pub store: StorageConfig,
     pub signer: SessionSigner,
+    pub printing: handlers::printing::PrintConfig,
 }
 
 impl FromRef<AppState> for MySqlPool {
@@ -35,6 +36,9 @@ impl FromRef<AppState> for StorageConfig {
 }
 impl FromRef<AppState> for SessionSigner {
     fn from_ref(s: &AppState) -> Self { s.signer.clone() }
+}
+impl FromRef<AppState> for handlers::printing::PrintConfig {
+    fn from_ref(s: &AppState) -> Self { s.printing.clone() }
 }
 
 #[tokio::main]
@@ -64,7 +68,8 @@ async fn main() -> anyhow::Result<()> {
 
     let store = StorageConfig::from_env_and_init().await?;
     let signer = SessionSigner::from_env()?;
-    let state = AppState { pool, store, signer };
+    let printing = handlers::printing::PrintConfig::from_env();
+    let state = AppState { pool, store, signer, printing };
 
     // Frontend is served as static assets out of this directory. Default
     // is "../frontend" relative to the backend cwd (matches the dev

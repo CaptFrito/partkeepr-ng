@@ -512,6 +512,21 @@
             const r = await fetch(`/api/parts/${partId}/locations/${lid}`, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete location failed: ${r.status} ${await r.text()}`);
         },
+        async printCapabilities() {
+            const r = await fetch("/api/print/capabilities");
+            if (!r.ok) throw new Error(`capabilities failed: ${r.status}`);
+            return r.json();
+        },
+        async printLabel(body) {
+            const r = await fetch("/api/print/label", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `print failed: ${r.status}`);
+            return data;
+        },
         async metaMatches(metaPartId) {
             const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
             if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
@@ -690,10 +705,69 @@
             cols: [
                 { view: "label", label: '<span class="pk-app-title">PartKeeper</span>', width: 160 },
                 {},
-                { view: "label", label: userHtml, width: 240 },
+                {
+                    view: "search",
+                    id: "pk-scan",
+                    placeholder: "🔍 Scan / search IPN…",
+                    width: 280,
+                    on: {
+                        // Webix's search view fires onSearchIconClick on icon
+                        // press; pressing Enter triggers onEnter only on
+                        // some skins. Bind both for predictability.
+                        onEnter: function () { handleScan(this.getValue()); this.setValue(""); },
+                        onSearchIconClick: function () { handleScan(this.getValue()); this.setValue(""); },
+                    },
+                },
+                { view: "button", value: "🖨 Label", width: 100, click: () => openLabelDialog({ template: "Custom" }) },
+                { view: "label", label: userHtml, width: 220 },
                 { view: "button", value: "Sign out", width: 100, click: doLogout },
             ],
         };
+    }
+
+    /// Scan input dispatcher. Barcode scanners are HID keyboards that
+    /// type the value followed by Enter, so this gets called on every
+    /// scan as well as manual typing+Enter. Tries IPN exact match
+    /// first, then a name LIKE search, then gives up with a toast.
+    async function handleScan(raw) {
+        const value = (raw || "").trim();
+        if (!value) return;
+        try {
+            // 1. Exact IPN. Use the existing parts list endpoint with
+            //    a `search` term — backend already does LIKE on
+            //    name/description/IPN. Take the first hit.
+            const resp = await api.parts({ search: value, limit: 5 });
+            if (resp.items && resp.items.length) {
+                const hit = resp.items[0];
+                // If there's exactly one hit OR the first hit's IPN
+                // matches the input exactly, jump straight to it.
+                const exact = resp.items.find((p) => (p.internal_part_number || "") === value);
+                const target = exact || hit;
+                // Switch to parts mode + scroll-to-and-select.
+                if ($$("pk-left-tabbar")) $$("pk-left-tabbar").setValue("tab-categories");
+                const cell = $$("centerpane-grid");
+                if (cell) cell.show();
+                await loadParts({ search: "" });  // clear filters; ensure target is in the grid
+                const grid = $$("pk-parts-grid");
+                if (grid) {
+                    if (!grid.exists(target.id)) {
+                        // Re-load parts targeted by id-search to make sure it's in view
+                        await loadParts({ search: target.internal_part_number || target.name });
+                    }
+                    if (grid.exists(target.id)) {
+                        grid.select(target.id);
+                        grid.showItem(target.id);
+                    }
+                }
+                await loadPartDetail(target.id);
+                webix.message({ type: "success", text: `Found: ${target.name}` });
+                return;
+            }
+            webix.message({ type: "error", text: `No part for "${value}"` });
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Scan failed: " + (e.message || e) });
+        }
     }
 
     async function doLogout() {
@@ -4620,6 +4694,17 @@
                                     width: 120,
                                     click: () => openStockDialog("reconcile"),
                                 },
+                                {
+                                    view: "button",
+                                    value: "🖨 Label",
+                                    width: 100,
+                                    click: () => openLabelDialog({
+                                        template: "Part",
+                                        id: currentPart && currentPart.id,
+                                        name: currentPart && currentPart.name,
+                                        internal_part_number: currentPart && currentPart.internal_part_number,
+                                    }),
+                                },
                                 {},
                             ],
                         },
@@ -6681,14 +6766,345 @@
     }
 
     // ============================================================
+    //  Slice 13 — label printing (Brother PT-D410 via ptouch-print)
+    //
+    //  Renderer (Canvas + bwip-js) is universal: any browser, any
+    //  OS, no backend needed for the "Download PNG" path. The
+    //  "Print to D410" button is only rendered when the backend
+    //  reports `ptouch.available=true` (i.e. PARTKEEPR_PTOUCH_BIN
+    //  is set and the binary exists).
+    // ============================================================
+
+    /// Cached on first mount of the shell. `null` while still loading.
+    let printCaps = null;
+
+    /// Default DPI of PT-D series printers. The renderer outputs at
+    /// this DPI so the preview is 1:1 with what ptouch-print sends
+    /// to the printhead.
+    const PT_DPI = 180;
+
+    /// Printable height in pixels per tape width, for PT-D series.
+    /// These are the **actual printable** values ptouch-print
+    /// expects — not the geometric tape width times DPI. The unprint-
+    /// able margins along each long edge of the tape eat the rest.
+    /// (Confirmed against ptouch-print --info on a PT-D410: 6mm tape
+    /// reports `maximum printing width for this tape is 32px`.)
+    const TAPE_PRINTABLE_PX = {
+        3.5: 24,
+        6:   32,
+        9:   50,
+        12:  70,
+    };
+
+    function tapeHeightPx(width_mm) {
+        const w = parseFloat(width_mm) || 12;
+        return TAPE_PRINTABLE_PX[w] || Math.round(w * PT_DPI / 25.4);
+    }
+
+    const LABEL_TEMPLATES = {
+        Part: {
+            label: "Part",
+            seedFields: (s) => [
+                s.name || "",
+                s.internal_part_number ? `IPN: ${s.internal_part_number}` : "",
+                "",
+            ],
+            qrPayloadFor: (s) => s.id ? `${location.origin}/#/part/${s.id}` : "",
+        },
+        StorageBin: {
+            label: "Storage Bin",
+            seedFields: (s) => [
+                s.name || "",
+                s.path || s.category_path || "",
+                "",
+            ],
+            qrPayloadFor: (s) => s.id ? `${location.origin}/#/storage/${s.id}` : "",
+        },
+        ReelFeeder: {
+            label: "Reel/Feeder",
+            seedFields: (s) => [
+                s.part_name || s.name || "",
+                s.internal_part_number ? `IPN: ${s.internal_part_number}` : "",
+                [
+                    s.form ? s.form : "",
+                    s.quantity != null ? `Qty: ${s.quantity}` : "",
+                    s.lot_number ? `Lot: ${s.lot_number}` : "",
+                ].filter(Boolean).join("  ·  "),
+            ],
+            qrPayloadFor: (s) => s.part_id ? `${location.origin}/#/part/${s.part_id}` : "",
+        },
+        Custom: {
+            label: "Custom",
+            seedFields: (s) => [s.line1 || "", s.line2 || "", s.line3 || ""],
+            qrPayloadFor: (s) => s.qr || "",
+        },
+    };
+
+    /// Pure renderer: take a normalized spec, return a Canvas. The
+    /// same canvas drives the live preview AND the PNG-blob output.
+    /// Spec shape: {width_mm, length_mm, lines: [string, ...], qr: string|null}
+    function renderLabel(spec) {
+        const heightPx = tapeHeightPx(spec.width_mm || 12);
+        // Add a bit of horizontal padding on each end to keep text
+        // off the cassette's leader; ptouch-print handles the actual
+        // tape feed but the visual margin is nicer.
+        const widthPx = Math.max(160, Math.round((spec.length_mm || 50) * PT_DPI / 25.4));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = widthPx;
+        canvas.height = heightPx;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, widthPx, heightPx);
+
+        // QR / barcode area on the right, square, full tape height.
+        let qrSizePx = 0;
+        if (spec.qr) {
+            qrSizePx = heightPx; // square
+            try {
+                // bwip-js writes directly into a temporary canvas;
+                // copy into ours at the right spot.
+                const tmp = document.createElement("canvas");
+                window.bwipjs.toCanvas(tmp, {
+                    bcid: "qrcode",
+                    text: spec.qr,
+                    scale: Math.max(1, Math.floor(qrSizePx / 30)),
+                    paddingwidth: 0,
+                    paddingheight: 0,
+                });
+                ctx.drawImage(tmp, widthPx - qrSizePx, 0, qrSizePx, qrSizePx);
+            } catch (e) {
+                console.warn("QR render failed:", e);
+                qrSizePx = 0;
+            }
+        }
+
+        // Text lines on the left. Auto-size font to fit lines into
+        // the tape height; non-empty lines only.
+        const textLines = (spec.lines || []).filter(Boolean);
+        const textWidthPx = widthPx - qrSizePx - 8;  // 4px gap
+        if (textLines.length > 0 && textWidthPx > 20) {
+            // Aim for a font size such that all lines fit vertically
+            // with ~20% leading. Cap by horizontal fit too.
+            const lineHeightFactor = 1.15;
+            const targetLineHeight = heightPx / textLines.length;
+            let fontPx = Math.floor(targetLineHeight / lineHeightFactor);
+            fontPx = Math.max(8, Math.min(fontPx, heightPx - 4));
+
+            // Shrink font further if the longest line overflows
+            // horizontally.
+            ctx.font = `${fontPx}px sans-serif`;
+            let widest = 0;
+            for (const l of textLines) widest = Math.max(widest, ctx.measureText(l).width);
+            if (widest > textWidthPx) {
+                fontPx = Math.max(8, Math.floor(fontPx * textWidthPx / widest));
+                ctx.font = `${fontPx}px sans-serif`;
+            }
+
+            ctx.fillStyle = "#000";
+            ctx.textBaseline = "top";
+            const lineH = fontPx * lineHeightFactor;
+            const totalH = lineH * textLines.length;
+            let y = Math.max(0, Math.floor((heightPx - totalH) / 2));
+            for (const l of textLines) {
+                ctx.fillText(l, 4, y);
+                y += lineH;
+            }
+        }
+
+        return canvas;
+    }
+
+    /// Open the label dialog seeded from the given context. `seed`
+    /// fields recognized: {template, name, internal_part_number, id,
+    /// part_id, part_name, path, category_path, form, quantity,
+    /// lot_number, line1, line2, line3, qr}. All optional.
+    function openLabelDialog(seed) {
+        seed = seed || {};
+        const initialTemplate = seed.template && LABEL_TEMPLATES[seed.template]
+            ? seed.template
+            : "Custom";
+        const tpl = LABEL_TEMPLATES[initialTemplate];
+        const seedLines = tpl.seedFields(seed);
+        const seedQr = tpl.qrPayloadFor(seed);
+
+        const widthOptions = [
+            { id: "3.5", value: "3.5 mm" },
+            { id: "6", value: "6 mm" },
+            { id: "9", value: "9 mm" },
+            { id: "12", value: "12 mm" },
+        ];
+        const tplOptions = Object.entries(LABEL_TEMPLATES).map(([k, v]) => ({ id: k, value: v.label }));
+
+        const renderPreview = () => {
+            const f = $$("pk-label-form").getValues();
+            const canvas = renderLabel({
+                width_mm: parseFloat(f.width_mm) || 12,
+                length_mm: parseFloat(f.length_mm) || 50,
+                lines: [f.line1 || "", f.line2 || "", f.line3 || ""],
+                qr: f.include_qr ? (f.qr || "") : null,
+            });
+            const host = $$("pk-label-preview");
+            if (!host || !host.$view) return;
+            host.$view.innerHTML = "";
+            // Center the canvas in its slot, give it a thin border so
+            // the operator can see the actual tape boundary.
+            canvas.style.border = "1px solid #b0b8be";
+            canvas.style.background = "#fff";
+            canvas.style.display = "block";
+            canvas.style.margin = "0 auto";
+            host.$view.appendChild(canvas);
+            // Stash the canvas on the dialog for the export buttons.
+            $$("pk-label-dialog").$labelCanvas = canvas;
+        };
+
+        const printAvailable = !!(printCaps && printCaps.ptouch && printCaps.ptouch.available);
+
+        webix.ui({
+            view: "window",
+            id: "pk-label-dialog",
+            modal: true,
+            position: "center",
+            width: 760,
+            height: 500,
+            head: "Print Label",
+            body: {
+                rows: [
+                    {
+                        view: "form",
+                        id: "pk-label-form",
+                        elementsConfig: { labelWidth: 110 },
+                        elements: [
+                            {
+                                cols: [
+                                    {
+                                        view: "richselect", name: "template", label: "Template",
+                                        options: tplOptions,
+                                        on: {
+                                            onChange: function (newKey) {
+                                                const t = LABEL_TEMPLATES[newKey];
+                                                if (!t) return;
+                                                const lines = t.seedFields(seed);
+                                                $$("pk-label-form").setValues({
+                                                    line1: lines[0] || "",
+                                                    line2: lines[1] || "",
+                                                    line3: lines[2] || "",
+                                                    qr: t.qrPayloadFor(seed),
+                                                }, true);
+                                                renderPreview();
+                                            },
+                                        },
+                                    },
+                                    { view: "richselect", name: "width_mm", label: "Tape", options: widthOptions, width: 200,
+                                      on: { onChange: renderPreview } },
+                                    { view: "counter", name: "length_mm", label: "Length (mm)", min: 10, max: 200, step: 5, width: 220 },
+                                ],
+                            },
+                            {
+                                cols: [
+                                    {
+                                        rows: [
+                                            { view: "text", name: "line1", label: "Line 1",
+                                              on: { onTimedKeyPress: renderPreview } },
+                                            { view: "text", name: "line2", label: "Line 2",
+                                              on: { onTimedKeyPress: renderPreview } },
+                                            { view: "text", name: "line3", label: "Line 3",
+                                              on: { onTimedKeyPress: renderPreview } },
+                                            { view: "checkbox", name: "include_qr", labelRight: "Include QR", labelWidth: 0, label: "",
+                                              on: { onChange: renderPreview } },
+                                            { view: "text", name: "qr", label: "QR payload",
+                                              on: { onTimedKeyPress: renderPreview } },
+                                        ],
+                                    },
+                                    {
+                                        rows: [
+                                            { template: '<div class="pk-detail-section-title" style="padding:0 8px">Live preview</div>',
+                                              height: 24, borderless: true },
+                                            { view: "template", id: "pk-label-preview", template: "",
+                                              borderless: true, css: "pk-label-preview" },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Close", width: 100, click: () => $$("pk-label-dialog").close() },
+                            { view: "button", value: "⬇ Download PNG", width: 160, css: "pk-btn-add", click: function () {
+                                const canvas = $$("pk-label-dialog").$labelCanvas;
+                                if (!canvas) return;
+                                canvas.toBlob((blob) => {
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    const f = $$("pk-label-form").getValues();
+                                    const slug = (f.line1 || "label").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 30) || "label";
+                                    a.download = `label-${slug}.png`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    URL.revokeObjectURL(url);
+                                }, "image/png");
+                            }},
+                            (printAvailable
+                                ? { view: "button", value: "🖨 Print to D410", width: 170, css: "webix_primary", click: async function () {
+                                      const canvas = $$("pk-label-dialog").$labelCanvas;
+                                      if (!canvas) return;
+                                      try {
+                                          const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+                                          const buf = await blob.arrayBuffer();
+                                          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+                                          const f = $$("pk-label-form").getValues();
+                                          await api.printLabel({ png_b64: b64, label_kind: f.template });
+                                          webix.message({ type: "success", text: "Sent to printer" });
+                                      } catch (e) {
+                                          webix.message({ type: "error", text: "Print failed: " + (e.message || e) });
+                                      }
+                                  }}
+                                : { width: 0 }
+                            ),
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        // Initial values + first render.
+        $$("pk-label-form").setValues({
+            template: initialTemplate,
+            width_mm: "12",
+            length_mm: 50,
+            line1: seedLines[0] || "",
+            line2: seedLines[1] || "",
+            line3: seedLines[2] || "",
+            include_qr: !!seedQr,
+            qr: seedQr,
+        });
+        setTimeout(renderPreview, 0);
+    }
+
+    // ============================================================
     //  Bootstrap
     // ============================================================
 
     webix.ready(async function () {
         try {
             const me = await api.me();
-            if (me) mountShell(me);
-            else mountLogin();
+            if (me) {
+                // Load print capabilities once; printCaps gates the
+                // Print button's visibility in the label dialog.
+                api.printCapabilities()
+                    .then((caps) => { printCaps = caps; })
+                    .catch((e) => console.warn("printCapabilities failed:", e));
+                mountShell(me);
+            } else {
+                mountLogin();
+            }
         } catch (e) {
             showFatalError(e);
         }

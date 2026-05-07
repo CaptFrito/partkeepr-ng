@@ -35,7 +35,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "rust_decimal",
     "macros",
 ] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "fs", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "fs", "io-util", "process"] }
 tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -16,6 +16,7 @@ pub mod nested_set;
 pub mod parametric;
 pub mod part_locations;
 pub mod parts;
+pub mod printing;
 pub mod projects;
 pub mod stock;
 pub mod storage;
@@ -240,4 +241,7 @@ pub fn routes() -> Router<AppState> {
             "/api/parts/:pid/locations/:lid",
             axum::routing::put(part_locations::update).delete(part_locations::delete),
         )
+        // Slice 13: label printing (capabilities + ptouch-print shell-out).
+        .route("/api/print/capabilities", get(printing::capabilities))
+        .route("/api/print/label", post(printing::print_label))
 }
