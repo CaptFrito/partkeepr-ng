@@ -56,7 +56,6 @@ pub mod user_provider;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/batch_jobs", get(batch_job::list))
-        .route("/api/grid_presets", get(grid_preset::list))
         .route("/api/import_presets", get(import_preset::list))
         .route("/api/stock_entries", get(stock_entry::list))
         .route("/api/system_preferences", get(system_preference::list))

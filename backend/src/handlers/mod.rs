@@ -10,6 +10,7 @@ pub mod auth;
 pub mod categories;
 pub mod clamd;
 pub mod footprints;
+pub mod grid_presets;
 pub mod lookups;
 pub mod nested_set;
 pub mod parametric;
@@ -214,5 +215,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/projects/:id/attachments/by-url",
             post(attachments::fetch_project_attachment),
+        )
+        // W8c.X: GridPreset CRUD (named saved column layouts per grid).
+        .route(
+            "/api/grid_presets",
+            get(grid_presets::list).post(grid_presets::create),
+        )
+        .route(
+            "/api/grid_presets/:id",
+            axum::routing::put(grid_presets::update).delete(grid_presets::delete),
         )
 }

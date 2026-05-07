@@ -75,6 +75,7 @@ SKIP_HANDLER_CLASSES = {
     "Project",                 # slice 8a: Project + BOM CRUD in handlers/projects.rs
     "ProjectPart",             # ditto (BOM lines as sub-resource on /api/projects/{pid}/parts)
     "ProjectAttachment",       # slice 7/8a: served via attachments pipeline + project-detail join
+    "GridPreset",              # W8c.X: per-grid named layout CRUD in handlers/grid_presets.rs
 }
 
 

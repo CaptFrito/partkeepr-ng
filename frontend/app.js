@@ -476,6 +476,33 @@
             if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
             return r.json();
         },
+        async listGridPresets(grid) {
+            const r = await fetch("/api/grid_presets?grid=" + encodeURIComponent(grid));
+            if (!r.ok) throw new Error(`list grid presets failed: ${r.status}`);
+            return r.json();
+        },
+        async createGridPreset(body) {
+            const r = await fetch("/api/grid_presets", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create grid preset failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateGridPreset(id, body) {
+            const r = await fetch(`/api/grid_presets/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update grid preset failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteGridPreset(id) {
+            const r = await fetch(`/api/grid_presets/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete grid preset failed: ${r.status} ${await r.text()}`);
+        },
     };
 
     // ============================================================
@@ -2843,6 +2870,13 @@
                         },
                         { view: "button", value: "⊞ Columns", width: 110, click: openColumnsDialog },
                         {
+                            view: "button",
+                            id: "pk-presets-button",
+                            value: "★ Presets ▾",
+                            width: 110,
+                            click: function () { openPresetsMenu(this); },
+                        },
+                        {
                             view: "toggle",
                             id: "pk-parametric-toggle",
                             type: "iconButton",
@@ -4091,14 +4125,22 @@
     }
 
     // ============================================================
-    //  Parts grid column persistence (W8c)
+    //  Parts grid column persistence (W8c) + named GridPresets (W8c.X)
     //
-    //  Webix datatable's getState/setState round-trips column order,
-    //  widths, and which ones are hidden. We save it to localStorage on
-    //  every change, keyed per user so different operators don't fight
-    //  over the layout. DB-backed persistence is W8c.X (needs new
-    //  /api/grid_presets POST/PUT/DELETE).
+    //  Two layers cooperate:
+    //    1. localStorage holds the current "last seen" layout per
+    //       user. Saved on every reorder/resize/hide/show. Restored on
+    //       mount so reload is invisible.
+    //    2. GridPreset rows on the server hold *named* shared layouts.
+    //       Anyone logged in can save/edit/delete; one row per grid
+    //       can be marked default. On a fresh session (no localStorage
+    //       yet) the default preset, if any, is applied.
+    //
+    //  PARTS_GRID = "parts" is the grid slug. Future grids reuse the
+    //  same backend by passing their own slug.
     // ============================================================
+
+    const PARTS_GRID = "parts";
 
     function partsGridStorageKey() {
         const u = currentUser ? currentUser.username : "anon";
@@ -4108,6 +4150,10 @@
     // Captured once on first mount so 'Reset layout' has a known target
     // to revert to. Cleared on logout.
     let _partsGridDefaultState = null;
+
+    // Cache of /api/grid_presets?grid=<slug> results, keyed by slug.
+    // Refreshed after every mutation.
+    let gridPresetsCache = {};
 
     function savePartsGridState() {
         const grid = $$("pk-parts-grid");
@@ -4120,20 +4166,32 @@
         }
     }
 
-    function restorePartsGridState() {
+    async function restorePartsGridState() {
         const grid = $$("pk-parts-grid");
         if (!grid) return;
         // Capture pristine defaults on first call so Reset can use them.
         if (_partsGridDefaultState == null) {
             try { _partsGridDefaultState = grid.getState(); } catch (_) {}
         }
+        // localStorage takes precedence. If present, that's the answer.
         try {
             const raw = localStorage.getItem(partsGridStorageKey());
-            if (!raw) return;
-            const state = JSON.parse(raw);
-            grid.setState(state);
+            if (raw) {
+                grid.setState(JSON.parse(raw));
+                return;
+            }
         } catch (e) {
-            console.warn("restorePartsGridState failed:", e);
+            console.warn("restorePartsGridState (localStorage) failed:", e);
+        }
+        // No local state — try the server's default preset (if any).
+        try {
+            const presets = await loadGridPresets(PARTS_GRID);
+            const def = presets.find((p) => p.grid_default);
+            if (def) {
+                applyGridPreset(def, /*persist=*/ true);
+            }
+        } catch (e) {
+            console.warn("restorePartsGridState (default preset) failed:", e);
         }
     }
 
@@ -4145,6 +4203,283 @@
         if (grid && _partsGridDefaultState != null) {
             try { grid.setState(_partsGridDefaultState); } catch (e) { console.warn(e); }
         }
+    }
+
+    // ----- GridPreset CRUD glue -----
+
+    async function loadGridPresets(grid, force = false) {
+        if (!force && gridPresetsCache[grid]) return gridPresetsCache[grid];
+        const list = await api.listGridPresets(grid);
+        gridPresetsCache[grid] = list;
+        return list;
+    }
+
+    function applyGridPreset(preset, persist = true) {
+        const grid = $$("pk-parts-grid");
+        if (!grid) return;
+        try {
+            grid.setState(JSON.parse(preset.configuration));
+        } catch (e) {
+            console.error("apply preset failed:", e);
+            webix.message({ type: "error", text: "Could not apply preset (bad configuration)" });
+            return;
+        }
+        // The preset's layout becomes the user's current layout. Save it
+        // through to localStorage so reloads stick.
+        if (persist) savePartsGridState();
+    }
+
+    function openPresetsMenu(toolbarButton) {
+        loadGridPresets(PARTS_GRID, /*force=*/ true)
+            .then((presets) => {
+                const items = [];
+                if (presets.length === 0) {
+                    items.push({ id: "_empty", value: "(no saved presets)", $css: "pk-help-hint" });
+                } else {
+                    for (const p of presets) {
+                        const star = p.grid_default ? "★ " : "  ";
+                        items.push({
+                            id: "apply:" + p.id,
+                            value: star + escapeHtml(p.name),
+                        });
+                    }
+                }
+                items.push({ $template: "Separator" });
+                items.push({ id: "save", value: "+ Save current as preset…" });
+                items.push({ id: "manage", value: "✎ Manage presets…" });
+
+                webix.ui({
+                    view: "popup",
+                    id: "pk-presets-popup",
+                    width: 240,
+                    body: {
+                        view: "list",
+                        autoheight: true,
+                        select: false,
+                        data: items,
+                        type: { height: 30 },
+                        template: function (o) {
+                            if (o.$template === "Separator") return "";
+                            return o.value;
+                        },
+                        on: {
+                            onItemClick: function (id) {
+                                $$("pk-presets-popup").close();
+                                if (id === "_empty") return;
+                                if (id === "save") { openSavePresetDialog(PARTS_GRID); return; }
+                                if (id === "manage") { openManagePresetsDialog(PARTS_GRID); return; }
+                                if (typeof id === "string" && id.startsWith("apply:")) {
+                                    const pid = parseInt(id.slice(6), 10);
+                                    const found = (gridPresetsCache[PARTS_GRID] || [])
+                                        .find((p) => p.id === pid);
+                                    if (found) {
+                                        applyGridPreset(found, true);
+                                        webix.message({ type: "success", text: `Preset "${found.name}" applied` });
+                                    }
+                                }
+                            },
+                        },
+                    },
+                }).show(toolbarButton.$view);
+            })
+            .catch((e) => {
+                console.error(e);
+                webix.message({ type: "error", text: "Failed to load presets" });
+            });
+    }
+
+    function openSavePresetDialog(grid) {
+        webix.ui({
+            view: "window",
+            id: "pk-save-preset-dialog",
+            modal: true,
+            position: "center",
+            width: 380,
+            head: "Save preset",
+            body: {
+                rows: [
+                    {
+                        view: "form",
+                        id: "pk-save-preset-form",
+                        elements: [
+                            { view: "text", name: "name", label: "Name", labelWidth: 90,
+                              placeholder: "e.g. Engineering, Procurement…" },
+                            { view: "checkbox", name: "grid_default", labelRight: "Make default for this grid",
+                              labelWidth: 0, label: "" },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 48,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90,
+                              click: () => $$("pk-save-preset-dialog").close() },
+                            { view: "button", value: "Save", width: 90, css: "webix_primary",
+                              click: async function () {
+                                  const v = $$("pk-save-preset-form").getValues();
+                                  const name = (v.name || "").trim();
+                                  if (!name) {
+                                      webix.message({ type: "error", text: "Name is required" });
+                                      return;
+                                  }
+                                  const ds = $$("pk-parts-grid");
+                                  if (!ds) return;
+                                  const config = JSON.stringify(ds.getState());
+                                  try {
+                                      await api.createGridPreset({
+                                          grid, name, configuration: config,
+                                          grid_default: !!v.grid_default,
+                                      });
+                                      gridPresetsCache[grid] = null;
+                                      $$("pk-save-preset-dialog").close();
+                                      webix.message({ type: "success", text: `Preset "${name}" saved` });
+                                  } catch (e) {
+                                      console.error(e);
+                                      webix.message({ type: "error", text: String(e.message || e) });
+                                  }
+                              } },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        setTimeout(() => {
+            const f = $$("pk-save-preset-form");
+            if (f) f.setValues({ name: "", grid_default: 0 });
+        }, 0);
+    }
+
+    function openManagePresetsDialog(grid) {
+        loadGridPresets(grid, true).then((presets) => {
+            webix.ui({
+                view: "window",
+                id: "pk-manage-presets-dialog",
+                modal: true,
+                position: "center",
+                width: 600,
+                height: 400,
+                head: "Manage presets",
+                body: {
+                    rows: [
+                        {
+                            view: "datatable",
+                            id: "pk-manage-presets-grid",
+                            data: presets,
+                            select: "row",
+                            columns: [
+                                { id: "name", header: "Name", fillspace: true },
+                                {
+                                    id: "grid_default", header: "Default", width: 80,
+                                    template: function (o) {
+                                        return `<input type="checkbox" data-default="${o.id}" ${o.grid_default ? "checked" : ""}>`;
+                                    },
+                                },
+                                {
+                                    id: "_overwrite", header: "Overwrite", width: 110,
+                                    template: function (o) {
+                                        return `<button class="pk-link-btn" data-overwrite="${o.id}">Replace with current</button>`;
+                                    },
+                                },
+                                {
+                                    id: "_delete", header: "", width: 80,
+                                    template: function (o) {
+                                        return `<button class="pk-link-btn" data-delete="${o.id}" style="color:#b03030">Delete</button>`;
+                                    },
+                                },
+                            ],
+                        },
+                        {
+                            view: "toolbar",
+                            css: "pk-dialog-actions",
+                            height: 48,
+                            cols: [
+                                {},
+                                { view: "button", value: "Close", width: 90, css: "webix_primary",
+                                  click: () => $$("pk-manage-presets-dialog").close() },
+                            ],
+                        },
+                    ],
+                },
+            }).show();
+
+            // Wire row-action click handlers after the datatable mounts.
+            setTimeout(() => {
+                const dt = $$("pk-manage-presets-grid");
+                if (!dt || !dt.$view) return;
+                dt.$view.addEventListener("click", async (ev) => {
+                    const t = ev.target;
+                    if (!t) return;
+                    const dId = t.dataset.delete && parseInt(t.dataset.delete, 10);
+                    const oId = t.dataset.overwrite && parseInt(t.dataset.overwrite, 10);
+                    const defId = t.dataset.default && parseInt(t.dataset.default, 10);
+
+                    if (dId) {
+                        const row = dt.getItem(dId);
+                        if (!row) return;
+                        webix.confirm({
+                            title: "Delete preset",
+                            text: `Delete preset "${escapeHtml(row.name)}"?`,
+                            ok: "Delete",
+                            cancel: "Cancel",
+                        }).then(async () => {
+                            try {
+                                await api.deleteGridPreset(dId);
+                                dt.remove(dId);
+                                gridPresetsCache[grid] = null;
+                                webix.message({ type: "success", text: "Preset deleted" });
+                            } catch (e) {
+                                webix.message({ type: "error", text: String(e.message || e) });
+                            }
+                        });
+                    } else if (oId) {
+                        const row = dt.getItem(oId);
+                        if (!row) return;
+                        const ds = $$("pk-parts-grid");
+                        if (!ds) return;
+                        try {
+                            const config = JSON.stringify(ds.getState());
+                            await api.updateGridPreset(oId, {
+                                grid, name: row.name, configuration: config,
+                                grid_default: !!row.grid_default,
+                            });
+                            row.configuration = config;
+                            gridPresetsCache[grid] = null;
+                            webix.message({ type: "success", text: `Preset "${row.name}" updated` });
+                        } catch (e) {
+                            webix.message({ type: "error", text: String(e.message || e) });
+                        }
+                    } else if (defId) {
+                        const row = dt.getItem(defId);
+                        if (!row) return;
+                        const newDefault = !!t.checked;
+                        try {
+                            await api.updateGridPreset(defId, {
+                                grid, name: row.name, configuration: row.configuration,
+                                grid_default: newDefault,
+                            });
+                            // If we set a new default, every other row in
+                            // the table loses its checkmark — patch the
+                            // local data to match the server's transaction.
+                            if (newDefault) {
+                                dt.data.each((r) => { if (r.id !== defId) r.grid_default = false; });
+                            }
+                            row.grid_default = newDefault;
+                            dt.refresh();
+                            gridPresetsCache[grid] = null;
+                        } catch (e) {
+                            // Roll the checkbox back on failure.
+                            t.checked = !newDefault;
+                            webix.message({ type: "error", text: String(e.message || e) });
+                        }
+                    }
+                });
+            }, 0);
+        }).catch((e) => {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load presets" });
+        });
     }
 
     function openColumnsDialog() {
