@@ -288,6 +288,13 @@ async fn fetch_url_core(
     // mid-download if the server lies about Content-Length (or omits it).
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(URL_FETCH_TIMEOUT_SECS))
+        // A browser-like User-Agent. Some vendors (e.g., NXP) reject
+        // requests that look like script clients ("reqwest/x.x"). This
+        // doesn't help against full bot protection (e.g., analog.com's
+        // Akamai), but covers the easy cases.
+        .user_agent(
+            "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+        )
         .build()
         .map_err(|e| {
             tracing::error!(error = %e, "build reqwest client");

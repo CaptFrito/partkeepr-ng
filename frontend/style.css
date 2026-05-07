@@ -252,6 +252,21 @@
     margin-right: 8px;
 }
 
+/* Attachments grid: thumbnail preview + doc icon */
+.pk-att-thumb {
+    height: 36px;
+    width: 36px;
+    object-fit: cover;
+    border-radius: 3px;
+    border: 1px solid #d8dde2;
+    vertical-align: middle;
+}
+
+.pk-att-doc {
+    font-size: 24px;
+    color: #5a6b7a;
+}
+
 /* =================================================================
    Detail action toolbar (Add stock / Remove / Reconcile)
    ================================================================= */

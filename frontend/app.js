@@ -331,6 +331,39 @@
             const r = await fetch(`${url}/${id}`, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete failed: ${r.status} ${await r.text()}`);
         },
+
+        // Attachments
+        async listAttachments(kind, parentId) {
+            const path = ATTACHMENT_KINDS[kind].listPath(parentId);
+            const r = await fetch(path);
+            if (!r.ok) throw new Error(`list attachments failed: ${r.status}`);
+            return r.json();
+        },
+        async fetchAttachmentByUrl(kind, parentId, url, filename) {
+            const path = ATTACHMENT_KINDS[kind].listPath(parentId) + "/by-url";
+            const body = { url };
+            if (filename) body.filename = filename;
+            const r = await fetch(path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`fetch by URL failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateAttachmentDescription(kind, id, description) {
+            const r = await fetch(`/api/attachments/${kind}/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ description: description || null }),
+            });
+            if (!r.ok) throw new Error(`update description failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteAttachment(kind, id) {
+            const r = await fetch(`/api/attachments/${kind}/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete attachment failed: ${r.status} ${await r.text()}`);
+        },
     };
 
     // ============================================================
@@ -1748,6 +1781,347 @@
     }
 
     // ============================================================
+    //  Attachments — reusable section for any of the 6 kinds
+    // ============================================================
+
+    const ATTACHMENT_KINDS = {
+        PartAttachment: {
+            listPath: (id) => `/api/parts/${id}/attachments`,
+            label: "Attachments",
+        },
+        FootprintImage: {
+            listPath: (id) => `/api/footprints/${id}/images`,
+            label: "Images",
+        },
+        FootprintAttachment: {
+            listPath: (id) => `/api/footprints/${id}/attachments`,
+            label: "Attachments",
+        },
+        ManufacturerICLogo: {
+            listPath: (id) => `/api/manufacturers/${id}/logos`,
+            label: "Logos",
+        },
+        StorageLocationImage: {
+            listPath: (id) => `/api/storage_locations/${id}/images`,
+            label: "Images",
+        },
+        ProjectAttachment: {
+            listPath: (id) => `/api/projects/${id}/attachments`,
+            label: "Attachments",
+        },
+    };
+
+    // Build a Webix view that shows the attachments for one parent entity.
+    //   tableId      — unique Webix id for the inner datatable
+    //   uploaderId   — unique Webix id for the file-picker
+    //   kind         — key into ATTACHMENT_KINDS
+    //   getParentId  — () => current parent id (or null when not yet saved)
+    function buildAttachmentsSection({ tableId, uploaderId, kind, getParentId }) {
+        return {
+            rows: [
+                {
+                    view: "toolbar",
+                    css: "pk-pane-toolbar",
+                    height: 38,
+                    cols: [
+                        {
+                            view: "uploader",
+                            id: uploaderId,
+                            value: "+ Attach files",
+                            css: "pk-btn-add",
+                            multiple: true,
+                            link: tableId,
+                            autosend: false,
+                            width: 130,
+                            on: {
+                                onBeforeFileAdd: function () {
+                                    const parentId = getParentId();
+                                    if (!parentId) {
+                                        webix.message({ type: "error", text: "Save the entity first." });
+                                        return false;
+                                    }
+                                    this.config.upload = ATTACHMENT_KINDS[kind].listPath(parentId);
+                                    return true;
+                                },
+                                onFileUpload: function () {
+                                    // Re-fetch the list so we get the server's
+                                    // canonical view (the uploader's auto-add
+                                    // skips fields like id/mimetype).
+                                    refreshAttachments({ tableId, kind, getParentId });
+                                },
+                                onFileUploadError: function (file, response) {
+                                    webix.message({
+                                        type: "error",
+                                        text: "Upload failed: " + (response && response.text ? response.text : "?"),
+                                    });
+                                },
+                            },
+                        },
+                        {
+                            view: "button",
+                            value: "+ From URL",
+                            css: "webix_primary",
+                            width: 110,
+                            click: () => openAttachmentByUrlDialog({ tableId, kind, getParentId }),
+                        },
+                        {
+                            view: "button",
+                            value: "✎ Description",
+                            width: 130,
+                            click: () => openAttachmentDescriptionDialog({ tableId, kind, getParentId }),
+                        },
+                        {
+                            view: "button",
+                            value: "🗑 Delete",
+                            css: "pk-btn-remove",
+                            width: 100,
+                            click: () => confirmAttachmentDelete({ tableId, kind, getParentId }),
+                        },
+                        {},
+                    ],
+                },
+                {
+                    view: "datatable",
+                    id: tableId,
+                    css: "pk-grid",
+                    select: "row",
+                    columns: [
+                        {
+                            id: "preview",
+                            header: "",
+                            width: 60,
+                            template: function (o) {
+                                if (!o.id) return "";
+                                if (o.is_image) {
+                                    return `<img src="/files/${kind}/${o.id}/thumb" alt="" class="pk-att-thumb">`;
+                                }
+                                return '<span class="pk-att-doc">📄</span>';
+                            },
+                        },
+                        {
+                            id: "originalname",
+                            header: "Filename",
+                            fillspace: true,
+                            template: function (o) {
+                                if (!o.id) return "";
+                                const name = escapeHtml(o.originalname || o.filename || "");
+                                return `<a href="/files/${kind}/${o.id}" target="_blank">${name}</a>`;
+                            },
+                        },
+                        {
+                            id: "size",
+                            header: { text: "Size", css: "pk-th-numeric" },
+                            width: 90,
+                            css: "pk-numeric",
+                            template: (o) => o.size ? `${(o.size / 1024).toFixed(1)} KB` : "",
+                        },
+                        {
+                            id: "mimetype",
+                            header: "Type",
+                            width: 130,
+                        },
+                        {
+                            id: "description",
+                            header: "Description",
+                            width: 200,
+                            template: (o) => escapeHtml(o.description || ""),
+                        },
+                    ],
+                    type: { height: 44 },  // taller rows for the thumbs
+                },
+            ],
+        };
+    }
+
+    async function refreshAttachments({ tableId, kind, getParentId }) {
+        const parentId = getParentId();
+        const grid = $$(tableId);
+        if (!grid) return;
+        if (!parentId) { grid.clearAll(); return; }
+        try {
+            const rows = await api.listAttachments(kind, parentId);
+            grid.clearAll();
+            grid.parse(rows);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function openAttachmentByUrlDialog({ tableId, kind, getParentId }) {
+        const parentId = getParentId();
+        if (!parentId) {
+            webix.message({ type: "error", text: "Save the entity first." });
+            return;
+        }
+        webix.ui({
+            view: "window",
+            id: "pk-att-url",
+            modal: true,
+            position: "center",
+            width: 520,
+            head: "Attach by URL",
+            body: {
+                view: "form",
+                id: "pk-att-url-form",
+                elements: [
+                    { view: "text", name: "url", label: "URL", labelWidth: 100, required: true },
+                    { view: "text", name: "filename", label: "Filename", labelWidth: 100,
+                      placeholder: "(optional — auto-detected)" },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-att-url").close() },
+                            {
+                                view: "button",
+                                value: "Fetch",
+                                width: 100,
+                                css: "webix_primary",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-att-url-form").getValues();
+                                    if (!v.url || !v.url.trim()) {
+                                        webix.message({ type: "error", text: "URL is required" });
+                                        return;
+                                    }
+                                    try {
+                                        await api.fetchAttachmentByUrl(kind, parentId,
+                                            v.url.trim(), (v.filename || "").trim() || null);
+                                        $$("pk-att-url").close();
+                                        await refreshAttachments({ tableId, kind, getParentId });
+                                        webix.message({ text: "Fetched", type: "success" });
+                                    } catch (e) {
+                                        showUrlFetchFailedAlert(v.url.trim(), e);
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        setTimeout(() => $$("pk-att-url-form").focus(), 0);
+    }
+
+    function openAttachmentDescriptionDialog({ tableId, kind, getParentId }) {
+        const grid = $$(tableId);
+        const sel = grid && grid.getSelectedId() ? grid.getItem(grid.getSelectedId()) : null;
+        if (!sel) {
+            webix.message({ type: "error", text: "Select an attachment first." });
+            return;
+        }
+        webix.ui({
+            view: "window",
+            id: "pk-att-desc",
+            modal: true,
+            position: "center",
+            width: 480,
+            head: `Edit description: ${sel.originalname || sel.filename}`,
+            body: {
+                view: "form",
+                id: "pk-att-desc-form",
+                elements: [
+                    { view: "textarea", name: "description", label: "Description", labelWidth: 100, height: 100 },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-att-desc").close() },
+                            {
+                                view: "button",
+                                value: "Save",
+                                width: 90,
+                                css: "webix_primary",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-att-desc-form").getValues();
+                                    try {
+                                        await api.updateAttachmentDescription(kind, sel.id, v.description);
+                                        $$("pk-att-desc").close();
+                                        await refreshAttachments({ tableId, kind, getParentId });
+                                        webix.message({ text: "Saved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-att-desc-form").setValues({ description: sel.description || "" });
+    }
+
+    function showUrlFetchFailedAlert(url, error) {
+        const msg = String(error && error.message ? error.message : error);
+
+        // Heuristics: extract the host so the alert mentions a specific
+        // vendor when known to be problematic.
+        let host = "";
+        try { host = new URL(url).host.replace(/^www\./, ""); } catch (_) {}
+        const knownBlockers = ["analog.com", "octopart.com", "digikey.com", "mouser.com"];
+        const isKnownBlocker = knownBlockers.some((h) => host.endsWith(h));
+
+        const reason = msg.includes("error sending request")
+            ? "the server refused the connection or timed out"
+            : msg.includes("status 403")
+                ? "the server returned 403 (forbidden — usually bot protection)"
+                : msg.includes("status 404")
+                    ? "the server returned 404 (URL not found)"
+                    : msg.includes("status 4")
+                        ? "the server returned a client error"
+                        : msg.includes("status 5")
+                            ? "the server returned a server error"
+                            : "an error occurred while fetching";
+
+        const blockerNote = isKnownBlocker
+            ? `<p><b>${escapeHtml(host)}</b> is known to block automated downloads via Akamai or Cloudflare bot protection. ` +
+              `Programmatic clients can't pass their TLS/JS challenges.</p>`
+            : "";
+
+        webix.alert({
+            title: "URL fetch failed",
+            width: 520,
+            text:
+                `<div style="text-align:left;line-height:1.5">` +
+                `<p>Could not fetch <code style="word-break:break-all">${escapeHtml(url)}</code> — ${reason}.</p>` +
+                blockerNote +
+                `<p><b>Workaround:</b> download the file manually in your browser, ` +
+                `then use <b>+ Attach files</b> to upload it.</p>` +
+                `<details style="margin-top:8px"><summary style="cursor:pointer;color:#6a7a8a">Show server message</summary>` +
+                `<pre style="background:#f3f5f7;padding:6px;font-size:11px;white-space:pre-wrap">${escapeHtml(msg)}</pre>` +
+                `</details>` +
+                `</div>`,
+        });
+    }
+
+    function confirmAttachmentDelete({ tableId, kind, getParentId }) {
+        const grid = $$(tableId);
+        const sel = grid && grid.getSelectedId() ? grid.getItem(grid.getSelectedId()) : null;
+        if (!sel) {
+            webix.message({ type: "error", text: "Select an attachment first." });
+            return;
+        }
+        const name = sel.originalname || sel.filename;
+        webix.confirm({
+            title: "Delete attachment",
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text: `Delete <b>${escapeHtml(name)}</b>? This removes the file from disk too.`,
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    await api.deleteAttachment(kind, sel.id);
+                    await refreshAttachments({ tableId, kind, getParentId });
+                    webix.message({ text: "Deleted", type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    // ============================================================
     //  Lookups CRUD — center pane content + per-type definitions
     // ============================================================
 
@@ -2910,6 +3284,15 @@
                                 },
                             },
                             {
+                                header: "Attachments",
+                                body: buildAttachmentsSection({
+                                    tableId: "pk-edit-attachments",
+                                    uploaderId: "pk-edit-attachments-uploader",
+                                    kind: "PartAttachment",
+                                    getParentId: () => (mode === "edit" && currentPart ? currentPart.id : null),
+                                }),
+                            },
+                            {
                                 header: "Parameters",
                                 body: {
                                     rows: [
@@ -2991,6 +3374,16 @@
             },
         }).show();
         $$("pk-editor-form").setValues(initial);
+
+        // Populate the Attachments tab — only meaningful when editing
+        // an existing part (new-mode parts have no id yet).
+        if (mode === "edit" && currentPart) {
+            refreshAttachments({
+                tableId: "pk-edit-attachments",
+                kind: "PartAttachment",
+                getParentId: () => currentPart.id,
+            });
+        }
     }
 
     async function submitPartEditor(mode) {
