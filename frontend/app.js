@@ -396,6 +396,49 @@
             const r = await fetch(`/api/projects/${id}`, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete project failed: ${r.status} ${await r.text()}`);
         },
+        async addBomLine(projectId, body) {
+            const r = await fetch(`/api/projects/${projectId}/parts`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`add BOM line failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateBomLine(projectId, ppid, body) {
+            const r = await fetch(`/api/projects/${projectId}/parts/${ppid}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update BOM line failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteBomLine(projectId, ppid) {
+            const r = await fetch(`/api/projects/${projectId}/parts/${ppid}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete BOM line failed: ${r.status} ${await r.text()}`);
+        },
+        async runPreview(projectId, quantity) {
+            const r = await fetch(`/api/projects/${projectId}/runs/preview?quantity=${quantity}`);
+            if (!r.ok) throw new Error(`run preview failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async runProject(projectId, body) {
+            const r = await fetch(`/api/projects/${projectId}/runs`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`run project failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async listRuns(projectId) {
+            const r = await fetch(`/api/projects/${projectId}/runs`);
+            if (!r.ok) throw new Error(`list runs failed: ${r.status}`);
+            return r.json();
+        },
+        async deleteRun(projectId, runId, restoreStock) {
+            const url = `/api/projects/${projectId}/runs/${runId}` + (restoreStock ? "?restore_stock=true" : "");
+            const r = await fetch(url, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete run failed: ${r.status} ${await r.text()}`);
+        },
     };
 
     // ============================================================
@@ -1943,17 +1986,84 @@
                 cols: [
                     { view: "label", id: "pk-project-title", label: "Project", css: "pk-pane-title" },
                     {},
+                    { view: "button", value: "▶ Run", css: "pk-btn-add", width: 80, click: openRunDialog },
                     { view: "button", value: "✎ Edit", css: "webix_primary", width: 90, click: openProjectEdit },
                     { view: "button", value: "🗑 Delete", css: "pk-btn-remove", width: 100, click: confirmProjectDelete },
                 ],
+            },
+            {
+                view: "template",
+                id: "pk-project-header",
+                template: '<div class="pk-detail-empty">Select a project from the left.</div>',
+                height: 70,
+                borderless: true,
+            },
+            {
+                view: "toolbar",
+                id: "pk-bom-toolbar",
+                css: "pk-pane-toolbar",
+                height: 38,
+                hidden: true,
+                cols: [
+                    { view: "label", id: "pk-bom-title", label: "BOM", css: "pk-pane-title" },
+                    {},
+                    { view: "button", value: "+ Line", css: "pk-btn-add", width: 80, click: openBomAdd },
+                    { view: "button", value: "✎ Edit", css: "webix_primary", width: 80, click: openBomEdit },
+                    { view: "button", value: "🗑 Remove", css: "pk-btn-remove", width: 95, click: confirmBomDelete },
+                ],
+            },
+            {
+                view: "datatable",
+                id: "pk-bom-grid",
+                css: "pk-grid",
+                hidden: true,
+                select: "row",
+                resizeColumn: { headerOnly: true, size: 4 },
+                columns: [
+                    {
+                        id: "part_name", header: "Part", width: 220, sort: "string",
+                        template: (o) => escapeHtml(o.part_name || ""),
+                    },
+                    {
+                        id: "part_internal_part_number", header: "IPN", width: 110, sort: "string",
+                        template: (o) => escapeHtml(o.part_internal_part_number || ""),
+                    },
+                    {
+                        id: "quantity", header: { text: "Qty", css: "pk-th-numeric" },
+                        width: 70, sort: "int", css: "pk-numeric",
+                    },
+                    {
+                        id: "overage", header: "Overage", width: 110,
+                        template: (o) => {
+                            if (!o.overage_type || !o.overage) return "";
+                            const suffix = o.overage_type === "percent" ? "%" : "";
+                            return `${o.overage}${suffix} (${o.overage_type})`;
+                        },
+                    },
+                    { id: "lot_number", header: "Lot", width: 110, template: (o) => escapeHtml(o.lot_number || "") },
+                    { id: "remarks", header: "Remarks", fillspace: true, template: (o) => escapeHtml(o.remarks || "") },
+                    {
+                        id: "part_stock_level", header: { text: "Stock", css: "pk-th-numeric" },
+                        width: 70, css: "pk-numeric",
+                        template: (o) => o.part_stock_level != null ? o.part_stock_level : "",
+                    },
+                ],
+                on: {
+                    onItemClick: function (sel) {
+                        // Drive the right-pane part detail when a BOM line is clicked.
+                        const row = this.getItem(sel.row);
+                        if (row && row.part_id) loadPartDetail(row.part_id);
+                    },
+                },
             },
             {
                 view: "scrollview",
                 id: "pk-project-scroll",
                 scroll: "y",
                 body: {
+                    view: "template",
                     id: "pk-project-body",
-                    template: '<div class="pk-detail-empty">Select a project from the left.</div>',
+                    template: " ",
                     autoheight: true,
                 },
             },
@@ -1961,60 +2071,53 @@
     }
 
     async function loadProjectIntoCenter(projectId) {
+        let proj, runs;
         try {
-            const proj = await api.projectById(projectId);
-            currentProject = proj;
-            $$("pk-project-title").setValue(`Project: ${escapeHtml(proj.name)}`);
-            $$("pk-project-body").setHTML(renderProjectHtml(proj));
-            // Make sure the multiview cell is visible.
-            const cell = $$("centerpane-project");
-            if (cell) cell.show();
+            // Fetch project + runs together so the lower section renders
+            // with run history in one HTML pass — no second async hop, no
+            // DOM-after-setHTML race.
+            [proj, runs] = await Promise.all([
+                api.projectById(projectId),
+                api.listRuns(projectId).catch(() => []),
+            ]);
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Failed to load project" });
+            return;
         }
+        currentProject = proj;
+        $$("pk-project-title").setValue(`Project: ${escapeHtml(proj.name)}`);
+        $$("pk-project-header").setHTML(renderProjectHeaderHtml(proj));
+        $$("pk-bom-toolbar").show();
+        $$("pk-bom-grid").show();
+        $$("pk-bom-title").setValue(`BOM (${(proj.parts || []).length})`);
+        const grid = $$("pk-bom-grid");
+        grid.clearAll();
+        grid.parse(proj.parts || []);
+        $$("pk-project-body").setHTML(renderProjectLowerHtml(proj, runs));
+        // Wire up delete-run buttons rendered into the runs-section table.
+        const sec = document.getElementById("pk-project-runs-section");
+        if (sec) {
+            sec.querySelectorAll('button[data-action="del-run"]').forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const rid = parseInt(btn.dataset.rid, 10);
+                    confirmRunDelete(projectId, rid);
+                });
+            });
+        }
+        const cell = $$("centerpane-project");
+        if (cell) cell.show();
     }
 
-    function renderProjectHtml(p) {
+    function renderProjectHeaderHtml(p) {
+        return `<div class="pk-detail-section pk-detail-header">
+            <div class="pk-detail-name">${escapeHtml(p.name)}</div>
+            ${p.description ? `<div class="pk-detail-desc">${escapeHtml(p.description)}</div>` : ""}
+        </div>`;
+    }
+
+    function renderProjectLowerHtml(p, runs) {
         const sections = [];
-
-        // Header
-        sections.push(`
-            <div class="pk-detail-section pk-detail-header">
-                <div class="pk-detail-name">${escapeHtml(p.name)}</div>
-                ${p.description ? `<div class="pk-detail-desc">${escapeHtml(p.description)}</div>` : ""}
-            </div>
-        `);
-
-        // BOM (read-only for now — W7b adds CRUD)
-        if (p.parts && p.parts.length) {
-            const rows = p.parts.map((bp) => `
-                <tr>
-                    <td>${escapeHtml(bp.part_name || "")}</td>
-                    <td>${escapeHtml(bp.part_internal_part_number || "")}</td>
-                    <td class="pk-numeric">${bp.quantity}</td>
-                    <td>${escapeHtml(bp.overage_type || "")}${bp.overage ? ` (${bp.overage})` : ""}</td>
-                    <td>${escapeHtml(bp.lot_number || "")}</td>
-                    <td>${escapeHtml(bp.remarks || "")}</td>
-                    <td class="pk-numeric">${bp.part_stock_level != null ? bp.part_stock_level : ""}</td>
-                </tr>
-            `).join("");
-            sections.push(detailSectionHtml(
-                `BOM (${p.parts.length} line${p.parts.length === 1 ? "" : "s"})`,
-                `<table class="pk-detail-table">
-                    <thead><tr>
-                        <th>Part</th><th>IPN</th><th class="pk-numeric">Qty</th>
-                        <th>Overage</th><th>Lot</th><th>Remarks</th><th class="pk-numeric">Stock</th>
-                    </tr></thead>
-                    <tbody>${rows}</tbody>
-                </table>
-                <p class="pk-help-hint">BOM editing lands in W7b · Run dialog in W7c</p>`
-            ));
-        } else {
-            sections.push(detailSectionHtml("BOM", `<p class="pk-help-hint">No BOM lines yet (editor lands in W7b).</p>`));
-        }
-
-        // Attachments
         if (p.attachments && p.attachments.length) {
             const rows = p.attachments.map((a) => {
                 const tag = a.is_image ? "img" : "doc";
@@ -2032,12 +2135,432 @@
             ));
         }
 
-        sections.push(detailSectionHtml(
-            "Runs",
-            `<p class="pk-help-hint">${p.runs_count} run${p.runs_count === 1 ? "" : "s"} on record · run dialog + history land in W7c</p>`
-        ));
-
+        let runsBody;
+        if (!runs || !runs.length) {
+            runsBody = `<p class="pk-help-hint">No runs yet — use ▶ Run to record a build.</p>`;
+        } else {
+            const rows = runs.map((r) => {
+                const date = (r.run.run_date_time || "").substring(0, 16).replace("T", " ");
+                const lines = (r.lines || []).length;
+                return `<tr>
+                    <td>${escapeHtml(date)}</td>
+                    <td class="pk-numeric">×${r.run.quantity}</td>
+                    <td class="pk-numeric">${lines} line${lines === 1 ? "" : "s"}</td>
+                    <td><button class="pk-link-btn" data-rid="${r.run.id}" data-action="del-run">delete…</button></td>
+                </tr>`;
+            }).join("");
+            runsBody = `<table class="pk-detail-table">
+                <thead><tr><th>When</th><th class="pk-numeric">Qty</th><th class="pk-numeric">Lines</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+        }
+        sections.push(`<div id="pk-project-runs-section">` +
+            detailSectionHtml(`Runs${runs && runs.length ? ` (${runs.length})` : ""}`, runsBody) +
+            `</div>`);
         return sections.join("");
+    }
+
+    // --- Run dialog ---
+
+    let runPreviewQty = 1;
+
+    function openRunDialog() {
+        if (!currentProject) {
+            webix.message({ type: "error", text: "Select a project first." });
+            return;
+        }
+        if (!currentProject.parts || !currentProject.parts.length) {
+            webix.message({ type: "error", text: "Project has no BOM lines — add some first." });
+            return;
+        }
+
+        runPreviewQty = 1;
+
+        webix.ui({
+            view: "window",
+            id: "pk-run-dialog",
+            modal: true,
+            position: "center",
+            width: 880,
+            height: 620,
+            head: `Run project: ${currentProject.name}`,
+            body: {
+                rows: [
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 44,
+                        cols: [
+                            { view: "label", label: "Build quantity:", width: 130, css: "pk-pane-title" },
+                            {
+                                view: "counter",
+                                id: "pk-run-quantity",
+                                value: 1, min: 1, step: 1, width: 110,
+                                on: {
+                                    onChange: function (newVal) {
+                                        runPreviewQty = parseInt(newVal, 10) || 1;
+                                        refreshRunPreview();
+                                    },
+                                },
+                            },
+                            {},
+                            {
+                                view: "label",
+                                id: "pk-run-banner",
+                                label: "",
+                                hidden: true,
+                                css: "pk-run-banner",
+                            },
+                        ],
+                    },
+                    {
+                        view: "datatable",
+                        id: "pk-run-preview",
+                        css: "pk-grid",
+                        select: false,
+                        rowCss: function (o) {
+                            return o.shortfall ? "pk-row-shortfall" : "";
+                        },
+                        columns: [
+                            { id: "part_name", header: "Part", fillspace: true,
+                              template: (o) => `${escapeHtml(o.part_name || "(orphan)")}${o.is_meta ? ' <span class="pk-detail-meta-tag">META</span>' : ""}` },
+                            { id: "bom_quantity", header: { text: "BOM", css: "pk-th-numeric" }, width: 60, css: "pk-numeric" },
+                            { id: "per_build", header: { text: "Per build", css: "pk-th-numeric" }, width: 80, css: "pk-numeric" },
+                            { id: "effective", header: { text: "Needed", css: "pk-th-numeric" }, width: 75, css: "pk-numeric" },
+                            { id: "current_stock", header: { text: "Stock", css: "pk-th-numeric" }, width: 65, css: "pk-numeric",
+                              template: (o) => o.current_stock != null ? o.current_stock : "—" },
+                            {
+                                id: "shortfall_label", header: "Status", width: 110,
+                                template: (o) => {
+                                    if (o.is_meta) return '<span class="pk-stock-remove">META — needs allocation</span>';
+                                    if (o.shortfall) return `<span class="pk-stock-remove">SHORTFALL ${(o.current_stock || 0) - o.effective}</span>`;
+                                    return '<span class="pk-stock-add">OK</span>';
+                                },
+                            },
+                            { id: "lot_number", header: "Lot", width: 100,
+                              template: (o) => escapeHtml(o.lot_number || "") },
+                        ],
+                    },
+                    { view: "textarea", id: "pk-run-comment", placeholder: "Run comment (optional)", height: 50 },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$("pk-run-dialog").close() },
+                            {
+                                view: "button",
+                                id: "pk-run-go",
+                                value: "▶ Run",
+                                width: 110,
+                                css: "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: doRun,
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        refreshRunPreview();
+    }
+
+    async function refreshRunPreview() {
+        if (!currentProject) return;
+        try {
+            const lines = await api.runPreview(currentProject.id, runPreviewQty);
+            const grid = $$("pk-run-preview");
+            grid.clearAll();
+            grid.parse(lines);
+            // Banner: how many shortfalls?
+            const shortfalls = lines.filter((l) => l.shortfall).length;
+            const metas = lines.filter((l) => l.is_meta).length;
+            const banner = $$("pk-run-banner");
+            if (metas > 0) {
+                banner.setValue(`<b>${metas}</b> meta-part line${metas === 1 ? "" : "s"} — backend will refuse without per-line allocations (W7c.X)`);
+                banner.show();
+            } else if (shortfalls > 0) {
+                banner.setValue(`<b>${shortfalls}</b> line${shortfalls === 1 ? "" : "s"} short — run will produce negative stock (allowed)`);
+                banner.show();
+            } else {
+                banner.hide();
+            }
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Preview failed: " + (e.message || e) });
+        }
+    }
+
+    async function doRun() {
+        if (!currentProject) return;
+        const body = {
+            quantity: runPreviewQty,
+            comment: ($$("pk-run-comment").getValue() || "").trim() || null,
+            lot_overrides: {},
+            allocations: {},
+        };
+        const projectId = currentProject.id;
+
+        // Step 1: actually run the project. Distinguish run failure from
+        // post-run refresh failure so we don't say "Run failed" after the
+        // backend already committed.
+        try {
+            await api.runProject(projectId, body);
+        } catch (e) {
+            console.error(e);
+            const msg = String(e.message || e);
+            if (msg.includes("meta-part")) {
+                webix.alert({
+                    title: "Run rejected",
+                    width: 540,
+                    text:
+                        '<div style="text-align:left;line-height:1.5">' +
+                        '<p>This BOM has one or more meta-part lines.</p>' +
+                        '<p>Meta-parts have no stock of their own — they need to be resolved to specific real parts at run time. ' +
+                        'The per-line allocation editor for that flow lands in W7c follow-up; for now, replace meta-parts with real parts on the BOM, or skip running this project.</p>' +
+                        `<details><summary>Server message</summary><pre>${escapeHtml(msg)}</pre></details>` +
+                        '</div>',
+                });
+            } else {
+                webix.message({ type: "error", text: "Run failed: " + msg });
+            }
+            return;
+        }
+
+        // Step 2: refresh UI. Failures here are surface-only — the run
+        // itself is already committed on the server.
+        $$("pk-run-dialog").close();
+        webix.message({ text: `Recorded run ×${body.quantity}`, type: "success" });
+        try {
+            await loadProjectIntoCenter(projectId);
+            await loadProjectsList(true);
+            const list = $$("pk-projects-list");
+            if (list && list.exists(projectId)) list.select(projectId);
+        } catch (e) {
+            console.error("post-run refresh failed:", e);
+            // Don't toast — the run succeeded, the user can refresh manually.
+        }
+    }
+
+    function confirmRunDelete(projectId, runId) {
+        webix.ui({
+            view: "window",
+            id: "pk-run-delete",
+            modal: true,
+            position: "center",
+            width: 480,
+            head: `Delete run #${runId}`,
+            body: {
+                view: "form",
+                id: "pk-run-delete-form",
+                elements: [
+                    {
+                        view: "label",
+                        label:
+                            "Run history is normally append-only. This is the admin escape hatch — " +
+                            "use it for fixing mistakes or cleaning up test runs.",
+                        height: 50,
+                    },
+                    {
+                        view: "checkbox",
+                        name: "restore_stock",
+                        labelRight: "Also restore stock (insert compensating positive entries)",
+                        labelWidth: 0,
+                        value: 0,
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$("pk-run-delete").close() },
+                            {
+                                view: "button",
+                                value: "Delete run",
+                                width: 130,
+                                css: "pk-btn-remove",
+                                click: async function () {
+                                    const v = $$("pk-run-delete-form").getValues();
+                                    try {
+                                        await api.deleteRun(projectId, runId, !!v.restore_stock);
+                                        $$("pk-run-delete").close();
+                                        await loadProjectIntoCenter(projectId);
+                                        await loadProjectsList(true);
+                                        const list = $$("pk-projects-list");
+                                        if (list && list.exists(projectId)) list.select(projectId);
+                                        webix.message({ text: "Run deleted", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+    }
+
+    // --- BOM CRUD ---
+
+    function openBomAdd() {
+        if (!currentProject) {
+            webix.message({ type: "error", text: "Select a project first." });
+            return;
+        }
+        openBomLineDialog("new", null);
+    }
+
+    function openBomEdit() {
+        if (!currentProject) return;
+        const grid = $$("pk-bom-grid");
+        const sel = grid && grid.getSelectedId() ? grid.getItem(grid.getSelectedId()) : null;
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a BOM line to edit." });
+            return;
+        }
+        openBomLineDialog("edit", sel);
+    }
+
+    function confirmBomDelete() {
+        if (!currentProject) return;
+        const grid = $$("pk-bom-grid");
+        const sel = grid && grid.getSelectedId() ? grid.getItem(grid.getSelectedId()) : null;
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a BOM line to remove." });
+            return;
+        }
+        const projId = currentProject.id;
+        webix.confirm({
+            title: "Remove BOM line",
+            type: "confirm-error",
+            ok: "Remove",
+            cancel: "Cancel",
+            text: `Remove <b>${escapeHtml(sel.part_name || "(orphan)")}</b> from BOM?`,
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    await api.deleteBomLine(projId, sel.id);
+                    await loadProjectIntoCenter(projId);
+                    webix.message({ text: "Removed", type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Remove failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function openBomLineDialog(mode, existing) {
+        const isEdit = mode === "edit";
+        const seed = existing || {
+            part_id: null, quantity: 1, remarks: "",
+            overage_type: "", overage: 0, lot_number: "",
+        };
+        webix.ui({
+            view: "window",
+            id: "pk-bom-line",
+            modal: true,
+            position: "center",
+            width: 540,
+            head: isEdit ? `Edit BOM line` : "New BOM line",
+            body: {
+                view: "form",
+                id: "pk-bom-line-form",
+                elements: [
+                    {
+                        view: "combo",
+                        id: "pk-bom-line-part",
+                        name: "part_id",
+                        label: "Part",
+                        labelWidth: 120,
+                        suggest: {
+                            body: {
+                                template: function (o) {
+                                    const ipn = o.internal_part_number ? ` <span class="pk-bom-ipn">${escapeHtml(o.internal_part_number)}</span>` : "";
+                                    const cat = o.category_path ? ` <span class="pk-bom-cat">${escapeHtml((o.category_path.split(" ➤ ").pop()) || "")}</span>` : "";
+                                    return `${escapeHtml(o.name || "")}${ipn}${cat}`;
+                                },
+                            },
+                            data: [],  // populated below
+                        },
+                        readonly: isEdit,  // can't change the part on an existing line — remove + re-add instead
+                    },
+                    { view: "counter", name: "quantity", label: "Quantity", labelWidth: 120, value: 1, min: 1, step: 1 },
+                    {
+                        view: "richselect",
+                        name: "overage_type",
+                        label: "Overage type",
+                        labelWidth: 120,
+                        options: [
+                            { id: "", value: "(none)" },
+                            { id: "absolute", value: "absolute" },
+                            { id: "percent", value: "percent" },
+                        ],
+                    },
+                    { view: "counter", name: "overage", label: "Overage amount", labelWidth: 120, value: 0, min: 0, step: 1 },
+                    { view: "text", name: "lot_number", label: "Lot number", labelWidth: 120 },
+                    { view: "textarea", name: "remarks", label: "Remarks", labelWidth: 120, height: 50 },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-bom-line").close() },
+                            {
+                                view: "button",
+                                value: isEdit ? "Save" : "Add",
+                                width: 100,
+                                css: "webix_primary",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-bom-line-form").getValues();
+                                    if (!v.part_id) {
+                                        webix.message({ type: "error", text: "Pick a part." });
+                                        return;
+                                    }
+                                    const body = {
+                                        part_id: parseInt(v.part_id, 10),
+                                        quantity: parseInt(v.quantity, 10) || 1,
+                                        remarks: (v.remarks || "").trim() || null,
+                                        overage_type: v.overage_type || "",
+                                        overage: parseInt(v.overage, 10) || 0,
+                                        lot_number: (v.lot_number || "").trim() || null,
+                                    };
+                                    try {
+                                        if (isEdit) {
+                                            await api.updateBomLine(currentProject.id, existing.id, body);
+                                        } else {
+                                            await api.addBomLine(currentProject.id, body);
+                                        }
+                                        $$("pk-bom-line").close();
+                                        await loadProjectIntoCenter(currentProject.id);
+                                        webix.message({ text: "Saved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        // Populate the part suggest list from /api/parts (full list — 685
+        // parts is small enough; we filter client-side via Webix's combo).
+        api.parts({ limit: 1000 }).then((json) => {
+            const data = (json.items || []).map((p) => ({
+                id: p.id,
+                value: p.name + (p.internal_part_number ? ` [${p.internal_part_number}]` : ""),
+                name: p.name,
+                internal_part_number: p.internal_part_number,
+                category_path: p.category_path,
+            }));
+            const suggest = $$("pk-bom-line-part").getPopup();
+            const list = suggest.getList();
+            list.clearAll();
+            list.parse(data);
+        }).catch((e) => console.error(e));
+        $$("pk-bom-line-form").setValues(seed);
     }
 
     // --- Project add/edit/delete ---

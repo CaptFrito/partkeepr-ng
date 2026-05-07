@@ -242,6 +242,44 @@
     border-top: 1px solid #d8dde2 !important;
 }
 
+/* Run-preview shortfall row + banner */
+.pk-row-shortfall {
+    background: #fdecea !important;
+}
+
+.pk-run-banner {
+    background: #fff3cd !important;
+    color: #4a3f00 !important;
+    border-radius: 3px !important;
+    padding: 4px 10px !important;
+    font-size: 12px !important;
+}
+
+.pk-link-btn {
+    background: none;
+    border: none;
+    color: #2980b9;
+    cursor: pointer;
+    font-size: 11px;
+    text-decoration: underline;
+    padding: 0;
+}
+.pk-link-btn:hover { color: #1f5e88; }
+
+/* BOM line picker — secondary tags inside the suggestion list */
+.pk-bom-ipn {
+    color: #6a7a8a;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    margin-left: 6px;
+}
+
+.pk-bom-cat {
+    color: #884ea0;
+    font-size: 11px;
+    margin-left: 6px;
+}
+
 /* Projects left-pane list */
 .pk-projects-list .webix_list_item {
     border-bottom: 1px solid #eef1f3;
