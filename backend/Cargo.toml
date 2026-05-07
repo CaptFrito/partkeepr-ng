@@ -37,3 +37,16 @@ tower-http = { version = "0.5", features = ["trace", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
+# Slice 10: auth — FOSUserBundle password verification (sha512 + 5000 iter
+# + base64) and HMAC-signed session-cookie payloads.
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+subtle = "2.6"
+tower = "0.5"
+# axum-extra gets us cookie-jar extractors so handlers can read/write
+# cookies without manually stitching headers.
+axum-extra = { version = "0.9", features = ["cookie"] }
+# Used for cookie max-age durations (the cookie crate's API takes
+# `time::Duration`, not `std::time::Duration` or `chrono::Duration`).
+time = "0.3"

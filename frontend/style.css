@@ -1533,3 +1533,81 @@ th.col-reset-cell, td.col-reset-cell {
 }
 th.col-reset-cell:hover { color: #2563eb; }
 td.col-reset-cell { cursor: default; }
+
+/* ----------------------------------------------------------------------- */
+/* Slice 10b: login screen + header user widget                            */
+/* ----------------------------------------------------------------------- */
+
+.auth-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    color: #6b7280;
+}
+.login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #f3f4f6;
+}
+.login-card {
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    padding: 24px 28px;
+    width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.login-title { margin: 0; font-size: 22px; color: #1f2937; }
+.login-subtitle { margin: -6px 0 4px 0; font-size: 13px; }
+.login-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.login-field span { font-size: 12px; color: #4b5563; }
+.login-field input {
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 14px;
+}
+.login-field input:focus {
+    outline: 2px solid #2563eb;
+    outline-offset: -1px;
+}
+.login-submit { margin-top: 4px; padding: 8px; font-size: 14px; }
+.login-foot { margin: 8px 0 0 0; font-size: 11px; line-height: 1.4; }
+
+.header-user {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+    font-size: 12px;
+    color: #1f2937;
+}
+.header-username { font-weight: 600; }
+.header-admin-badge {
+    background: #fef3c7;
+    color: #78350f;
+    border-radius: 2px;
+    font-size: 10px;
+    padding: 1px 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.header-logout {
+    background: transparent;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+    color: #4b5563;
+    font-size: 11px;
+}
+.header-logout:hover { background: #f3f4f6; color: #1f2937; }

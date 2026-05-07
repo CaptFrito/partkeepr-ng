@@ -1,7 +1,28 @@
 //! Thin client over the slice 4a backend endpoints.
 
-use gloo_net::http::Request;
+use gloo_net::http::{Request, RequestBuilder};
 use serde::Serialize;
+
+/// Slice 10: every same-origin request must include cross-origin
+/// credentials so the browser sends the `partkeepr_session` cookie
+/// to the API server (which lives on a different port during dev).
+/// Wrapping `Request::*` lets us flip this on at one point instead of
+/// remembering it at 60+ call sites.
+pub fn http_get(url: &str) -> RequestBuilder {
+    Request::get(url).credentials(web_sys::RequestCredentials::Include)
+}
+pub fn http_post(url: &str) -> RequestBuilder {
+    Request::post(url).credentials(web_sys::RequestCredentials::Include)
+}
+pub fn http_put(url: &str) -> RequestBuilder {
+    Request::put(url).credentials(web_sys::RequestCredentials::Include)
+}
+pub fn http_delete(url: &str) -> RequestBuilder {
+    Request::delete(url).credentials(web_sys::RequestCredentials::Include)
+}
+pub fn http_patch(url: &str) -> RequestBuilder {
+    Request::patch(url).credentials(web_sys::RequestCredentials::Include)
+}
 
 use crate::types::{
     AllRunsResponse, CategoryNode, DistributorRow, FootprintTreeNode, ManufacturerRow,
@@ -26,7 +47,7 @@ impl<E: std::fmt::Display> From<E> for ApiError {
 }
 
 pub async fn fetch_category_tree() -> Result<Vec<CategoryNode>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/part_categories/tree"))
+    Ok(http_get(&format!("{API_BASE}/api/part_categories/tree"))
         .send()
         .await?
         .json()
@@ -116,7 +137,7 @@ pub async fn fetch_parts(
     if let Some(s) = &fields.condition_like {
         url.push_str(&format!("&condition_like={}", urlencode(s)));
     }
-    Ok(Request::get(&url).send().await?.json().await?)
+    Ok(http_get(&url).send().await?.json().await?)
 }
 
 /// Slice 6a — by-field filter knobs that ride alongside the parametric
@@ -149,7 +170,7 @@ pub struct FieldFilters {
 }
 
 pub async fn fetch_part_detail(id: i32) -> Result<PartDetail, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/parts/{id}"))
+    Ok(http_get(&format!("{API_BASE}/api/parts/{id}"))
         .send()
         .await?
         .json()
@@ -165,7 +186,7 @@ pub struct StockChange {
 }
 
 pub async fn post_stock_entry(part_id: i32, body: StockChange) -> Result<(), ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/parts/{part_id}/stock-entries"))
+    let resp = http_post(&format!("{API_BASE}/api/parts/{part_id}/stock-entries"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -259,7 +280,7 @@ pub struct PartParameterWrite {
 }
 
 pub async fn post_part(body: PartWrite) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/parts"))
+    let resp = http_post(&format!("{API_BASE}/api/parts"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -277,7 +298,7 @@ pub async fn post_part(body: PartWrite) -> Result<i32, ApiError> {
 }
 
 pub async fn put_part(part_id: i32, body: PartWrite) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/parts/{part_id}"))
+    let resp = http_put(&format!("{API_BASE}/api/parts/{part_id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -292,7 +313,7 @@ pub async fn put_part(part_id: i32, body: PartWrite) -> Result<(), ApiError> {
 }
 
 pub async fn delete_part(part_id: i32) -> Result<(), ApiError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/parts/{part_id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/parts/{part_id}"))
         .send()
         .await?;
     if !resp.ok() {
@@ -312,7 +333,7 @@ pub struct LookupOption {
 }
 
 async fn fetch_lookup(path: &str) -> Result<Vec<LookupOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}{path}"))
+    Ok(http_get(&format!("{API_BASE}{path}"))
         .send()
         .await?
         .json()
@@ -350,7 +371,7 @@ pub struct UnitOption {
     pub symbol: String,
 }
 pub async fn fetch_units_full() -> Result<Vec<UnitOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/units"))
+    Ok(http_get(&format!("{API_BASE}/api/units"))
         .send().await?.json().await?)
 }
 
@@ -367,7 +388,7 @@ pub struct SiPrefixOption {
     pub base: i32,
 }
 pub async fn fetch_si_prefixes() -> Result<Vec<SiPrefixOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/si_prefixes"))
+    Ok(http_get(&format!("{API_BASE}/api/si_prefixes"))
         .send().await?.json().await?)
 }
 
@@ -414,7 +435,7 @@ pub enum CategoryDeleteError {
 }
 
 pub async fn fetch_categories_flat_full() -> Result<Vec<CategoryFlatOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/part_categories"))
+    Ok(http_get(&format!("{API_BASE}/api/part_categories"))
         .send()
         .await?
         .json()
@@ -422,7 +443,7 @@ pub async fn fetch_categories_flat_full() -> Result<Vec<CategoryFlatOption>, Api
 }
 
 pub async fn post_category(body: CategoryCreate) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/part_categories"))
+    let resp = http_post(&format!("{API_BASE}/api/part_categories"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -440,7 +461,7 @@ pub async fn post_category(body: CategoryCreate) -> Result<i32, ApiError> {
 }
 
 pub async fn put_category(id: i32, body: CategoryUpdate) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/part_categories/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/part_categories/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -455,7 +476,7 @@ pub async fn put_category(id: i32, body: CategoryUpdate) -> Result<(), ApiError>
 }
 
 pub async fn delete_category(id: i32) -> Result<(), CategoryDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/part_categories/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/part_categories/{id}"))
         .send()
         .await
         .map_err(|e| CategoryDeleteError::Other(e.to_string()))?;
@@ -479,7 +500,7 @@ pub async fn delete_category(id: i32) -> Result<(), CategoryDeleteError> {
 
 pub async fn move_category(id: i32, new_parent_id: i32) -> Result<(), ApiError> {
     let body = serde_json::json!({"new_parent_id": new_parent_id});
-    let resp = Request::patch(&format!("{API_BASE}/api/part_categories/{id}/move"))
+    let resp = http_patch(&format!("{API_BASE}/api/part_categories/{id}/move"))
         .header("content-type", "application/json")
         .body(body.to_string())
         .map_err(ApiError::from)?
@@ -496,12 +517,12 @@ pub async fn move_category(id: i32, new_parent_id: i32) -> Result<(), ApiError> 
 // --- Slice 5c-2: StorageLocationCategory + StorageLocation CRUD ---
 
 pub async fn fetch_storage_tree() -> Result<Vec<StorageTreeNode>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/storage_tree"))
+    Ok(http_get(&format!("{API_BASE}/api/storage_tree"))
         .send().await?.json().await?)
 }
 
 pub async fn fetch_storage_cats_flat_full() -> Result<Vec<CategoryFlatOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/storage_location_categories"))
+    Ok(http_get(&format!("{API_BASE}/api/storage_location_categories"))
         .send().await?.json().await?)
 }
 
@@ -536,7 +557,7 @@ pub enum StorageCatDeleteError {
 }
 
 pub async fn post_storage_cat(body: StorageCatCreate) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/storage_location_categories"))
+    let resp = http_post(&format!("{API_BASE}/api/storage_location_categories"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -553,7 +574,7 @@ pub async fn post_storage_cat(body: StorageCatCreate) -> Result<i32, ApiError> {
 }
 
 pub async fn put_storage_cat(id: i32, body: StorageCatUpdate) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/storage_location_categories/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/storage_location_categories/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -567,7 +588,7 @@ pub async fn put_storage_cat(id: i32, body: StorageCatUpdate) -> Result<(), ApiE
 }
 
 pub async fn delete_storage_cat(id: i32) -> Result<(), StorageCatDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/storage_location_categories/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/storage_location_categories/{id}"))
         .send().await
         .map_err(|e| StorageCatDeleteError::Other(e.to_string()))?;
     if resp.ok() { return Ok(()); }
@@ -585,7 +606,7 @@ pub async fn delete_storage_cat(id: i32) -> Result<(), StorageCatDeleteError> {
 
 pub async fn move_storage_cat(id: i32, new_parent_id: i32) -> Result<(), ApiError> {
     let body = serde_json::json!({"new_parent_id": new_parent_id});
-    let resp = Request::patch(&format!("{API_BASE}/api/storage_location_categories/{id}/move"))
+    let resp = http_patch(&format!("{API_BASE}/api/storage_location_categories/{id}/move"))
         .header("content-type", "application/json")
         .body(body.to_string())
         .map_err(ApiError::from)?
@@ -625,7 +646,7 @@ pub enum StorageLocDeleteError {
 }
 
 pub async fn post_storage_loc(body: StorageLocCreate) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/storage_locations"))
+    let resp = http_post(&format!("{API_BASE}/api/storage_locations"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -642,7 +663,7 @@ pub async fn post_storage_loc(body: StorageLocCreate) -> Result<i32, ApiError> {
 }
 
 pub async fn put_storage_loc(id: i32, body: StorageLocUpdate) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/storage_locations/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/storage_locations/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -656,7 +677,7 @@ pub async fn put_storage_loc(id: i32, body: StorageLocUpdate) -> Result<(), ApiE
 }
 
 pub async fn delete_storage_loc(id: i32) -> Result<(), StorageLocDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/storage_locations/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/storage_locations/{id}"))
         .send().await
         .map_err(|e| StorageLocDeleteError::Other(e.to_string()))?;
     if resp.ok() { return Ok(()); }
@@ -674,7 +695,7 @@ pub async fn delete_storage_loc(id: i32) -> Result<(), StorageLocDeleteError> {
 
 pub async fn move_storage_loc(id: i32, new_category_id: i32) -> Result<(), ApiError> {
     let body = serde_json::json!({"new_category_id": new_category_id});
-    let resp = Request::patch(&format!("{API_BASE}/api/storage_locations/{id}/move"))
+    let resp = http_patch(&format!("{API_BASE}/api/storage_locations/{id}/move"))
         .header("content-type", "application/json")
         .body(body.to_string())
         .map_err(ApiError::from)?
@@ -690,12 +711,12 @@ pub async fn move_storage_loc(id: i32, new_category_id: i32) -> Result<(), ApiEr
 // --- Slice 5c-3: FootprintCategory + Footprint CRUD ---
 
 pub async fn fetch_footprint_tree() -> Result<Vec<FootprintTreeNode>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/footprint_tree"))
+    Ok(http_get(&format!("{API_BASE}/api/footprint_tree"))
         .send().await?.json().await?)
 }
 
 pub async fn fetch_footprint_cats_flat_full() -> Result<Vec<CategoryFlatOption>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/footprint_categories"))
+    Ok(http_get(&format!("{API_BASE}/api/footprint_categories"))
         .send().await?.json().await?)
 }
 
@@ -727,7 +748,7 @@ pub enum FootprintCatDeleteError {
 }
 
 pub async fn post_footprint_cat(body: FootprintCatCreate) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/footprint_categories"))
+    let resp = http_post(&format!("{API_BASE}/api/footprint_categories"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -744,7 +765,7 @@ pub async fn post_footprint_cat(body: FootprintCatCreate) -> Result<i32, ApiErro
 }
 
 pub async fn put_footprint_cat(id: i32, body: FootprintCatUpdate) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/footprint_categories/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/footprint_categories/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -758,7 +779,7 @@ pub async fn put_footprint_cat(id: i32, body: FootprintCatUpdate) -> Result<(), 
 }
 
 pub async fn delete_footprint_cat(id: i32) -> Result<(), FootprintCatDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/footprint_categories/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/footprint_categories/{id}"))
         .send().await
         .map_err(|e| FootprintCatDeleteError::Other(e.to_string()))?;
     if resp.ok() { return Ok(()); }
@@ -776,7 +797,7 @@ pub async fn delete_footprint_cat(id: i32) -> Result<(), FootprintCatDeleteError
 
 pub async fn move_footprint_cat(id: i32, new_parent_id: i32) -> Result<(), ApiError> {
     let body = serde_json::json!({"new_parent_id": new_parent_id});
-    let resp = Request::patch(&format!("{API_BASE}/api/footprint_categories/{id}/move"))
+    let resp = http_patch(&format!("{API_BASE}/api/footprint_categories/{id}/move"))
         .header("content-type", "application/json")
         .body(body.to_string())
         .map_err(ApiError::from)?
@@ -818,7 +839,7 @@ pub enum FootprintDeleteError {
 }
 
 pub async fn post_footprint(body: FootprintCreate) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/footprints"))
+    let resp = http_post(&format!("{API_BASE}/api/footprints"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -835,7 +856,7 @@ pub async fn post_footprint(body: FootprintCreate) -> Result<i32, ApiError> {
 }
 
 pub async fn put_footprint(id: i32, body: FootprintUpdate) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/footprints/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/footprints/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body).map_err(ApiError::from)?)
         .map_err(ApiError::from)?
@@ -849,7 +870,7 @@ pub async fn put_footprint(id: i32, body: FootprintUpdate) -> Result<(), ApiErro
 }
 
 pub async fn delete_footprint(id: i32) -> Result<(), FootprintDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/footprints/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/footprints/{id}"))
         .send().await
         .map_err(|e| FootprintDeleteError::Other(e.to_string()))?;
     if resp.ok() { return Ok(()); }
@@ -867,7 +888,7 @@ pub async fn delete_footprint(id: i32) -> Result<(), FootprintDeleteError> {
 
 pub async fn move_footprint(id: i32, new_category_id: i32) -> Result<(), ApiError> {
     let body = serde_json::json!({"new_category_id": new_category_id});
-    let resp = Request::patch(&format!("{API_BASE}/api/footprints/{id}/move"))
+    let resp = http_patch(&format!("{API_BASE}/api/footprints/{id}/move"))
         .header("content-type", "application/json")
         .body(body.to_string())
         .map_err(ApiError::from)?
@@ -883,23 +904,23 @@ pub async fn move_footprint(id: i32, new_category_id: i32) -> Result<(), ApiErro
 // --- Slice 5c-4: rich lookup fetches + per-entity CRUD ---
 
 pub async fn fetch_manufacturers_full() -> Result<Vec<ManufacturerRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/manufacturers"))
+    Ok(http_get(&format!("{API_BASE}/api/manufacturers"))
         .send().await?.json().await?)
 }
 pub async fn fetch_distributors_full() -> Result<Vec<DistributorRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/distributors"))
+    Ok(http_get(&format!("{API_BASE}/api/distributors"))
         .send().await?.json().await?)
 }
 pub async fn fetch_part_units_full() -> Result<Vec<PartUnitRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/part_measurement_units"))
+    Ok(http_get(&format!("{API_BASE}/api/part_measurement_units"))
         .send().await?.json().await?)
 }
 pub async fn fetch_units_rich() -> Result<Vec<UnitRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/units"))
+    Ok(http_get(&format!("{API_BASE}/api/units"))
         .send().await?.json().await?)
 }
 pub async fn fetch_si_prefixes_rich() -> Result<Vec<SiPrefixRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/si_prefixes"))
+    Ok(http_get(&format!("{API_BASE}/api/si_prefixes"))
         .send().await?.json().await?)
 }
 
@@ -907,7 +928,7 @@ pub async fn fetch_si_prefixes_rich() -> Result<Vec<SiPrefixRow>, ApiError> {
 /// shapes (the dialogs build the right shape per kind). Returns the
 /// new id on POST or just () on PUT/DELETE.
 pub async fn lookup_post(path: &str, body: &serde_json::Value) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}{path}"))
+    let resp = http_post(&format!("{API_BASE}{path}"))
         .header("content-type", "application/json")
         .body(body.to_string()).map_err(ApiError::from)?
         .send().await?;
@@ -921,7 +942,7 @@ pub async fn lookup_post(path: &str, body: &serde_json::Value) -> Result<i32, Ap
 }
 
 pub async fn lookup_put(path: &str, body: &serde_json::Value) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}{path}"))
+    let resp = http_put(&format!("{API_BASE}{path}"))
         .header("content-type", "application/json")
         .body(body.to_string()).map_err(ApiError::from)?
         .send().await?;
@@ -943,7 +964,7 @@ pub enum LookupDeleteError {
 }
 
 pub async fn lookup_delete(path: &str) -> Result<(), LookupDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}{path}"))
+    let resp = http_delete(&format!("{API_BASE}{path}"))
         .send().await
         .map_err(|e| LookupDeleteError::Other(e.to_string()))?;
     if resp.ok() { return Ok(()); }
@@ -1010,7 +1031,7 @@ pub async fn upload_files(
             .map_err(|_| ApiError("FormData.append failed".into()))?;
     }
     let body: wasm_bindgen::JsValue = form.into();
-    let resp = Request::post(&format!("{API_BASE}{upload_path}"))
+    let resp = http_post(&format!("{API_BASE}{upload_path}"))
         .body(body).map_err(ApiError::from)?
         .send().await?;
     if !resp.ok() {
@@ -1033,7 +1054,7 @@ pub async fn upload_by_url(
         "url": url,
         "filename": filename_override,
     });
-    let resp = Request::post(&format!("{API_BASE}{upload_path}/by-url"))
+    let resp = http_post(&format!("{API_BASE}{upload_path}/by-url"))
         .header("content-type", "application/json")
         .body(body.to_string()).map_err(ApiError::from)?
         .send().await?;
@@ -1046,7 +1067,7 @@ pub async fn upload_by_url(
 }
 
 pub async fn delete_attachment(kind: &str, id: i32) -> Result<(), ApiError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/attachments/{kind}/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/attachments/{kind}/{id}"))
         .send().await?;
     if !resp.ok() {
         let s = resp.status();
@@ -1062,7 +1083,7 @@ pub async fn update_attachment_description(
     description: Option<String>,
 ) -> Result<(), ApiError> {
     let body = serde_json::json!({"description": description});
-    let resp = Request::put(&format!("{API_BASE}/api/attachments/{kind}/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/attachments/{kind}/{id}"))
         .header("content-type", "application/json")
         .body(body.to_string()).map_err(ApiError::from)?
         .send().await?;
@@ -1079,12 +1100,12 @@ pub async fn update_attachment_description(
 // ---------------------------------------------------------------------------
 
 pub async fn fetch_projects() -> Result<Vec<ProjectListRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/projects"))
+    Ok(http_get(&format!("{API_BASE}/api/projects"))
         .send().await?.json().await?)
 }
 
 pub async fn fetch_project_detail(id: i32) -> Result<ProjectDetail, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/projects/{id}"))
+    Ok(http_get(&format!("{API_BASE}/api/projects/{id}"))
         .send().await?.json().await?)
 }
 
@@ -1095,7 +1116,7 @@ pub struct ProjectWrite {
 }
 
 pub async fn post_project(body: ProjectWrite) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/projects"))
+    let resp = http_post(&format!("{API_BASE}/api/projects"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1110,7 +1131,7 @@ pub async fn post_project(body: ProjectWrite) -> Result<i32, ApiError> {
 }
 
 pub async fn put_project(id: i32, body: ProjectWrite) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/projects/{id}"))
+    let resp = http_put(&format!("{API_BASE}/api/projects/{id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1130,7 +1151,7 @@ pub enum ProjectDeleteError {
 }
 
 pub async fn delete_project(id: i32) -> Result<(), ProjectDeleteError> {
-    let resp = Request::delete(&format!("{API_BASE}/api/projects/{id}"))
+    let resp = http_delete(&format!("{API_BASE}/api/projects/{id}"))
         .send().await
         .map_err(|e| ProjectDeleteError::Other(e.into()))?;
     if resp.ok() {
@@ -1158,7 +1179,7 @@ pub struct BomLineWrite {
 }
 
 pub async fn post_bom_line(project_id: i32, body: BomLineWrite) -> Result<i32, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/projects/{project_id}/parts"))
+    let resp = http_post(&format!("{API_BASE}/api/projects/{project_id}/parts"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1175,7 +1196,7 @@ pub async fn post_bom_line(project_id: i32, body: BomLineWrite) -> Result<i32, A
 pub async fn put_bom_line(
     project_id: i32, line_id: i32, body: BomLineWrite,
 ) -> Result<(), ApiError> {
-    let resp = Request::put(&format!("{API_BASE}/api/projects/{project_id}/parts/{line_id}"))
+    let resp = http_put(&format!("{API_BASE}/api/projects/{project_id}/parts/{line_id}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1188,7 +1209,7 @@ pub async fn put_bom_line(
 }
 
 pub async fn delete_bom_line(project_id: i32, line_id: i32) -> Result<(), ApiError> {
-    let resp = Request::delete(
+    let resp = http_delete(
         &format!("{API_BASE}/api/projects/{project_id}/parts/{line_id}"),
     ).send().await?;
     if !resp.ok() {
@@ -1202,13 +1223,13 @@ pub async fn delete_bom_line(project_id: i32, line_id: i32) -> Result<(), ApiErr
 pub async fn fetch_run_preview(
     project_id: i32, quantity: i32,
 ) -> Result<Vec<RunPreviewLine>, ApiError> {
-    Ok(Request::get(&format!(
+    Ok(http_get(&format!(
         "{API_BASE}/api/projects/{project_id}/runs/preview?quantity={quantity}"
     )).send().await?.json().await?)
 }
 
 pub async fn fetch_run_history(project_id: i32) -> Result<Vec<RunHistoryEntry>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/projects/{project_id}/runs"))
+    Ok(http_get(&format!("{API_BASE}/api/projects/{project_id}/runs"))
         .send().await?.json().await?)
 }
 
@@ -1237,17 +1258,17 @@ pub struct RunAllocation {
 }
 
 pub async fn fetch_part_projects(part_id: i32) -> Result<Vec<PartProjectRef>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/parts/{part_id}/projects"))
+    Ok(http_get(&format!("{API_BASE}/api/parts/{part_id}/projects"))
         .send().await?.json().await?)
 }
 
 pub async fn fetch_part_runs(part_id: i32) -> Result<Vec<PartRunRef>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/parts/{part_id}/runs"))
+    Ok(http_get(&format!("{API_BASE}/api/parts/{part_id}/runs"))
         .send().await?.json().await?)
 }
 
 pub async fn fetch_all_runs(limit: u32, offset: u32) -> Result<AllRunsResponse, ApiError> {
-    Ok(Request::get(&format!(
+    Ok(http_get(&format!(
         "{API_BASE}/api/project_runs?limit={limit}&offset={offset}"
     )).send().await?.json().await?)
 }
@@ -1255,7 +1276,7 @@ pub async fn fetch_all_runs(limit: u32, offset: u32) -> Result<AllRunsResponse, 
 pub async fn delete_run(
     project_id: i32, run_id: i32, restore_stock: bool,
 ) -> Result<(), ApiError> {
-    let resp = Request::delete(&format!(
+    let resp = http_delete(&format!(
         "{API_BASE}/api/projects/{project_id}/runs/{run_id}?restore_stock={restore_stock}"
     )).send().await?;
     if !resp.ok() {
@@ -1267,7 +1288,7 @@ pub async fn delete_run(
 }
 
 pub async fn post_run(project_id: i32, body: RunRequest) -> Result<serde_json::Value, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/projects/{project_id}/runs"))
+    let resp = http_post(&format!("{API_BASE}/api/projects/{project_id}/runs"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1284,7 +1305,7 @@ pub async fn post_run(project_id: i32, body: RunRequest) -> Result<serde_json::V
 // ---------------------------------------------------------------------------
 
 pub async fn fetch_parameter_names() -> Result<Vec<ParameterNameRow>, ApiError> {
-    Ok(Request::get(&format!("{API_BASE}/api/part_parameters/names"))
+    Ok(http_get(&format!("{API_BASE}/api/part_parameters/names"))
         .send().await?.json().await?)
 }
 
@@ -1297,7 +1318,7 @@ pub async fn fetch_parameter_values(
         urlencode(name),
         value_type,
     );
-    Ok(Request::get(&url).send().await?.json().await?)
+    Ok(http_get(&url).send().await?.json().await?)
 }
 
 /// Wire shape of one predicate. Mirrors the backend's `Predicate`. Either
@@ -1378,13 +1399,13 @@ pub struct ParametricBody {
 pub async fn fetch_part_matches(
     part_id: i32, limit: u32, offset: u32,
 ) -> Result<PartListResponse, ApiError> {
-    Ok(Request::get(&format!(
+    Ok(http_get(&format!(
         "{API_BASE}/api/parts/{part_id}/matches?limit={limit}&offset={offset}"
     )).send().await?.json().await?)
 }
 
 pub async fn post_parametric(body: ParametricBody) -> Result<PartListResponse, ApiError> {
-    let resp = Request::post(&format!("{API_BASE}/api/parts/parametric"))
+    let resp = http_post(&format!("{API_BASE}/api/parts/parametric"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&body)?).map_err(ApiError::from)?
         .send().await?;
@@ -1394,6 +1415,72 @@ pub async fn post_parametric(body: ParametricBody) -> Result<PartListResponse, A
         return Err(ApiError(format!("HTTP {s}: {b}")));
     }
     Ok(resp.json().await?)
+}
+
+// ---------------------------------------------------------------------------
+//  Slice 10: auth (login / logout / me)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Deserialize, PartialEq)]
+pub struct CurrentUserView {
+    pub user_id: i32,
+    pub username: String,
+    pub is_admin: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LoginResponseEnvelope {
+    user: CurrentUserView,
+}
+
+#[derive(Debug, Clone)]
+pub enum AuthError {
+    /// 401 from /api/me or /api/login — caller should redirect to login.
+    Unauthenticated,
+    /// 401 from /api/login with bad credentials specifically.
+    BadCredentials,
+    Other(ApiError),
+}
+
+pub async fn fetch_current_user() -> Result<Option<CurrentUserView>, ApiError> {
+    let resp = http_get(&format!("{API_BASE}/api/me")).send().await?;
+    if resp.status() == 401 { return Ok(None); }
+    if !resp.ok() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(ApiError(format!("HTTP {s}: {b}")));
+    }
+    Ok(Some(resp.json().await?))
+}
+
+pub async fn login(username: &str, password: &str) -> Result<CurrentUserView, AuthError> {
+    let body = serde_json::json!({"username": username, "password": password});
+    let resp = http_post(&format!("{API_BASE}/api/login"))
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .map_err(|e| AuthError::Other(e.into()))?
+        .send().await
+        .map_err(|e| AuthError::Other(e.into()))?;
+    if resp.status() == 401 { return Err(AuthError::BadCredentials); }
+    if !resp.ok() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(AuthError::Other(ApiError(format!("HTTP {s}: {b}"))));
+    }
+    let env: LoginResponseEnvelope = resp.json().await
+        .map_err(|e| AuthError::Other(e.into()))?;
+    Ok(env.user)
+}
+
+pub async fn logout() -> Result<(), ApiError> {
+    let resp = http_post(&format!("{API_BASE}/api/logout"))
+        .send().await?;
+    if !resp.ok() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(ApiError(format!("HTTP {s}: {b}")));
+    }
+    Ok(())
 }
 
 /// Minimal percent-encoder for query strings. Avoids pulling a dependency.

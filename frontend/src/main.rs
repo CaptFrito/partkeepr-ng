@@ -113,10 +113,10 @@ fn base64_url_decode(s: &str) -> Result<Vec<u8>, ()> {
 use components::{
     BomLineDialog, CategoryEditDialog, CategoryMoveDialog, CategoryTree, DeleteConfirmDialog,
     FootprintCatEditDialog, FootprintLeafEditDialog, FootprintMoveDialog, FootprintTree,
-    LeftPaneTabs, LookupEditDialog, LookupTypeList, LookupsPanel, MetaPartHelpDialog,
-    ParamTypeHelpDialog, PartDetailPanel, PartsGrid, ProjectEditDialog, ProjectPanel,
-    ProjectsList, RunDeleteDialog, RunProjectDialog, StockDialog, StorageCatEditDialog,
-    StorageLocEditDialog, StorageMoveDialog, StorageTree,
+    HeaderUser, LeftPaneTabs, LoginScreen, LookupEditDialog, LookupTypeList, LookupsPanel,
+    MetaPartHelpDialog, ParamTypeHelpDialog, PartDetailPanel, PartsGrid, ProjectEditDialog,
+    ProjectPanel, ProjectsList, RunDeleteDialog, RunProjectDialog, StockDialog,
+    StorageCatEditDialog, StorageLocEditDialog, StorageMoveDialog, StorageTree,
 };
 
 // Newtype wrappers around RwSignal so context lookups (by type) don't
@@ -185,6 +185,19 @@ pub struct GridColumnsState(pub RwSignal<Vec<components::grid_columns::ColumnSta
 /// dragged so dragover/drop handlers can find it. None when no drag.
 #[derive(Clone, Copy)]
 pub struct ColumnDragState(pub RwSignal<Option<String>>);
+
+/// Slice 10 — auth status. `Unknown` is the initial state before the
+/// startup `fetch_current_user` lands; once that resolves, we either
+/// know the user (`LoggedIn`) or that there's no session (`LoggedOut`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum AuthStatus {
+    Unknown,
+    LoggedIn(api::CurrentUserView),
+    LoggedOut,
+}
+
+#[derive(Clone, Copy)]
+pub struct AuthState(pub RwSignal<AuthStatus>);
 /// Open stock-entry dialog. None when closed.
 #[derive(Clone, Copy)]
 pub struct StockDialogState(pub RwSignal<Option<StockDialogCtx>>);
@@ -626,6 +639,7 @@ fn App() -> impl IntoView {
     let field_filters = FieldFiltersState(RwSignal::new(api::FieldFilters::default()));
     let grid_columns = GridColumnsState(RwSignal::new(components::grid_columns::load_layout()));
     let column_drag = ColumnDragState(RwSignal::new(None));
+    let auth = AuthState(RwSignal::new(AuthStatus::Unknown));
 
     provide_context(selected_category);
     provide_context(selected_part);
@@ -664,11 +678,24 @@ fn App() -> impl IntoView {
     provide_context(field_filters);
     provide_context(grid_columns);
     provide_context(column_drag);
+    provide_context(auth);
 
     // Persist column layout to localStorage on any mutation.
     Effect::new(move |_| {
         let layout = grid_columns.0.get();
         components::grid_columns::save_layout(&layout);
+    });
+
+    // Slice 10: kick off the initial auth check. The first render shows
+    // a tiny loading state while this runs; AuthState then transitions
+    // to LoggedIn or LoggedOut and the App component picks the
+    // corresponding view.
+    leptos::task::spawn_local(async move {
+        match api::fetch_current_user().await {
+            Ok(Some(u))  => auth.0.set(AuthStatus::LoggedIn(u)),
+            Ok(None)     => auth.0.set(AuthStatus::LoggedOut),
+            Err(_)       => auth.0.set(AuthStatus::LoggedOut),
+        }
     });
 
     // Push predicate changes into the URL hash so a filtered view is
@@ -678,14 +705,38 @@ fn App() -> impl IntoView {
         write_predicates_to_hash(&preds);
     });
 
-    let app_class = move || {
+    let app_class = Signal::derive(move || {
         let l = if left_collapsed.0.get() { " left-collapsed" } else { "" };
         let r = if right_collapsed.0.get() { " right-collapsed" } else { "" };
         format!("app{l}{r}")
+    });
+
+    let render_app = move || {
+        view! { <AppShell app_class=app_class/> }.into_any()
     };
 
     view! {
-        <div class=app_class>
+        {move || match auth.0.get() {
+            AuthStatus::Unknown => view! {
+                <div class="auth-loading">"Checking session…"</div>
+            }.into_any(),
+            AuthStatus::LoggedOut => view! { <LoginScreen/> }.into_any(),
+            AuthStatus::LoggedIn(_) => render_app(),
+        }}
+    }
+}
+
+/// Slice 10b — the existing app body, now nested under an auth gate.
+/// Pulled into its own component so the App() function can switch
+/// between this and the login screen based on AuthState.
+#[component]
+fn AppShell(#[prop(into)] app_class: Signal<String>) -> impl IntoView {
+    let left_collapsed = expect_context::<LeftCollapsed>();
+    let right_collapsed = expect_context::<RightCollapsed>();
+    let left_pane_mode = expect_context::<LeftPaneModeState>();
+
+    view! {
+        <div class=move || app_class.get()>
             <header>
                 <button class="panel-toggle"
                     title="Toggle category tree"
@@ -694,6 +745,7 @@ fn App() -> impl IntoView {
                 </button>
                 <span class="title">"partkeepr-ng — Part Manager"</span>
                 <div style="flex:1"/>
+                <HeaderUser/>
                 <button class="panel-toggle"
                     title="Toggle detail panel"
                     on:click=move |_| right_collapsed.0.update(|v| *v = !*v)>

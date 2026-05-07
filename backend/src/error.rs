@@ -16,6 +16,11 @@ pub enum AppError {
     /// hard-block on outstanding references and need to report counts so
     /// the UI can render an actionable message.
     Conflict(serde_json::Value),
+    /// 401. Slice 10: returned by the auth login handler on bad
+    /// credentials; the auth middleware uses a direct response, not
+    /// this variant, but it's available for any future handler that
+    /// needs to refuse based on the session.
+    Unauthorized(&'static str),
     Db(sqlx::Error),
 }
 
@@ -39,6 +44,11 @@ impl IntoResponse for AppError {
             )
                 .into_response(),
             AppError::Conflict(body) => (StatusCode::CONFLICT, Json(body)).into_response(),
+            AppError::Unauthorized(msg) => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": msg})),
+            )
+                .into_response(),
             AppError::Db(e) => {
                 tracing::error!(error = %e, "database error");
                 (

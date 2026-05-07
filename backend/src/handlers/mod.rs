@@ -6,6 +6,7 @@ use axum::{
 use crate::AppState;
 
 pub mod attachments;
+pub mod auth;
 pub mod categories;
 pub mod clamd;
 pub mod footprints;
@@ -23,6 +24,10 @@ pub mod storage_locations;
 /// not being in codegen output (see SKIP_HANDLER_CLASSES in the codegen).
 pub fn routes() -> Router<AppState> {
     Router::new()
+        // Slice 10a — auth.
+        .route("/api/login", post(auth::login))
+        .route("/api/logout", post(auth::logout))
+        .route("/api/me", get(auth::me))
         .route("/api/part_categories/tree", get(parts::category_tree))
         .route(
             "/api/part_categories",

@@ -18,9 +18,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
-use gloo_net::http::Request;
-
-use crate::api;
+use crate::api::{self, http_get};
 use crate::types::PartAttachmentView;
 use crate::DataVersion;
 
@@ -295,7 +293,7 @@ pub fn AttachmentsSelfLoader(
         let path = list_path_for_fetch.clone();
         async move {
             let url = format!("{base}{path}", base = api::API_BASE_PUB);
-            Request::get(&url).send().await
+            http_get(&url).send().await
                 .map_err(|e| api::ApiError(e.to_string()))?
                 .json::<Vec<PartAttachmentView>>().await
                 .map_err(|e| api::ApiError(e.to_string()))

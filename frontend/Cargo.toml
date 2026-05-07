@@ -17,4 +17,5 @@ web-sys = { version = "0.3", features = [
     "File", "FileList", "FormData", "Blob",
     "Storage", "Window",                       # slice 6c localStorage
     "DragEvent", "DataTransfer",               # slice 6c column reorder
+    "RequestCredentials",                      # slice 10 cookie cross-origin
 ] }

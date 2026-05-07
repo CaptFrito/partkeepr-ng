@@ -1,4 +1,5 @@
 pub mod attachments_section;
+pub mod auth_views;
 pub mod bom_line_dialog;
 pub mod category_edit_dialog;
 pub mod category_move_dialog;
@@ -31,6 +32,7 @@ pub mod storage_move_dialog;
 pub mod storage_tree;
 
 pub use attachments_section::AttachmentsSection;
+pub use auth_views::{HeaderUser, LoginScreen};
 pub use bom_line_dialog::BomLineDialog;
 pub use category_edit_dialog::CategoryEditDialog;
 pub use category_move_dialog::CategoryMoveDialog;
