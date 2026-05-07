@@ -51,6 +51,18 @@
             if (!r.ok) throw new Error(`part ${id} failed: ${r.status}`);
             return r.json();
         },
+        async addStockEntry(partId, body) {
+            const r = await fetch(`/api/parts/${partId}/stock-entries`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const txt = await r.text();
+                throw new Error(`stock save failed: ${r.status} ${txt}`);
+            }
+            return r.json();
+        },
     };
 
     // ============================================================
@@ -400,22 +412,59 @@
                     ],
                 },
                 {
+                    view: "toolbar",
+                    id: "pk-detail-actions",
+                    css: "pk-detail-actions",
+                    height: 38,
+                    hidden: true,
+                    cols: [
+                        {
+                            view: "button",
+                            value: "+ Add stock",
+                            css: "pk-btn-add",
+                            width: 110,
+                            click: () => openStockDialog("add"),
+                        },
+                        {
+                            view: "button",
+                            value: "− Remove",
+                            css: "pk-btn-remove",
+                            width: 100,
+                            click: () => openStockDialog("remove"),
+                        },
+                        {
+                            view: "button",
+                            value: "⇄ Reconcile",
+                            css: "webix_primary",
+                            width: 110,
+                            click: () => openStockDialog("reconcile"),
+                        },
+                        {},
+                    ],
+                },
+                {
                     view: "scrollview",
                     id: "pk-detail-scroll",
+                    scroll: "y",
                     body: {
                         id: "pk-detail",
                         template: '<div class="pk-detail-empty">Select a part to view detail.</div>',
+                        autoheight: true,
                     },
                 },
             ],
         };
     }
 
+    let currentPart = null;
+
     async function loadPartDetail(id) {
         try {
             const part = await api.part(id);
-            const view = $$("pk-detail");
-            view.setHTML(renderPartDetailHtml(part));
+            currentPart = part;
+            $$("pk-detail").setHTML(renderPartDetailHtml(part));
+            const actions = $$("pk-detail-actions");
+            if (actions) actions.show();
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Failed to load part detail" });
@@ -538,6 +587,159 @@
         return `<table class="pk-detail-kv">${
             rows.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${v}</td></tr>`).join("")
         }</table>`;
+    }
+
+    // ============================================================
+    //  Stock dialog (add / remove / reconcile)
+    // ============================================================
+
+    function openStockDialog(mode) {
+        if (!currentPart) return;
+        const titles = { add: "Add stock", remove: "Remove stock", reconcile: "Reconcile stock" };
+        const subtitle =
+            `<div class="pk-dialog-subtitle">` +
+            `On hand: <b>${currentPart.stock_level}</b>` +
+            (currentPart.average_price && parseFloat(currentPart.average_price) > 0
+                ? ` &middot; Avg price: <b>${escapeHtml(currentPart.average_price)}</b>`
+                : "") +
+            `</div>`;
+
+        const elements = [
+            {
+                view: "template",
+                template:
+                    `<div class="pk-dialog-part-name">${escapeHtml(currentPart.name)}</div>` +
+                    subtitle,
+                height: 50,
+                borderless: true,
+                css: "pk-dialog-header",
+            },
+        ];
+
+        if (mode === "reconcile") {
+            elements.push({
+                view: "counter",
+                id: "pk-stock-target",
+                label: "New on-hand total",
+                labelWidth: 150,
+                value: currentPart.stock_level,
+                step: 1,
+            });
+        } else {
+            elements.push({
+                view: "counter",
+                id: "pk-stock-qty",
+                label: mode === "add" ? "Add quantity" : "Remove quantity",
+                labelWidth: 150,
+                value: 1,
+                min: 1,
+                step: 1,
+            });
+        }
+
+        if (mode === "add") {
+            elements.push({
+                view: "text",
+                id: "pk-stock-price",
+                label: "Price (per piece)",
+                labelWidth: 150,
+                value: currentPart.average_price || "",
+            });
+        }
+
+        elements.push({
+            view: "textarea",
+            id: "pk-stock-comment",
+            label: "Comment",
+            labelWidth: 150,
+            height: 60,
+        });
+
+        elements.push({
+            cols: [
+                {},
+                {
+                    view: "button",
+                    value: "Cancel",
+                    width: 90,
+                    click: () => $$("pk-stock-dialog").close(),
+                },
+                {
+                    view: "button",
+                    value: "Save",
+                    width: 90,
+                    css:
+                        mode === "add" ? "pk-btn-add" :
+                        mode === "remove" ? "pk-btn-remove" :
+                        "webix_primary",
+                    hotkey: "enter",
+                    click: () => submitStock(mode),
+                },
+            ],
+        });
+
+        webix.ui({
+            view: "window",
+            id: "pk-stock-dialog",
+            modal: true,
+            position: "center",
+            width: 440,
+            head: titles[mode],
+            css: "pk-stock-dialog",
+            body: { view: "form", id: "pk-stock-form", elements },
+        }).show();
+    }
+
+    async function submitStock(mode) {
+        if (!currentPart) return;
+        const partId = currentPart.id;
+        let body;
+
+        if (mode === "reconcile") {
+            const target = $$("pk-stock-target").getValue();
+            const delta = target - currentPart.stock_level;
+            if (delta === 0) {
+                webix.message({ type: "error", text: "Target equals current level — nothing to reconcile." });
+                return;
+            }
+            body = {
+                stock_level: delta,
+                comment: $$("pk-stock-comment").getValue() || null,
+                correction: true,
+            };
+        } else {
+            const qty = $$("pk-stock-qty").getValue();
+            if (qty <= 0) {
+                webix.message({ type: "error", text: "Quantity must be at least 1." });
+                return;
+            }
+            body = {
+                stock_level: mode === "add" ? qty : -qty,
+                comment: $$("pk-stock-comment").getValue() || null,
+                correction: false,
+            };
+            if (mode === "add") {
+                const price = $$("pk-stock-price").getValue();
+                if (price && parseFloat(price) >= 0) body.price = price;
+            }
+        }
+
+        try {
+            await api.addStockEntry(partId, body);
+            $$("pk-stock-dialog").close();
+            // Refresh detail (stock entries + level + avg) and parts grid (stock column).
+            await loadPartDetail(partId);
+            await loadParts({});
+            // Re-select the row so the highlight stays consistent.
+            const grid = $$("pk-parts-grid");
+            if (grid && grid.exists(partId)) {
+                grid.select(partId);
+                grid.showItem(partId);
+            }
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Stock save failed: " + (e.message || e) });
+        }
     }
 
     // ============================================================

@@ -217,6 +217,69 @@
 .pk-stock-remove { color: #b03030; font-weight: 600; }
 
 /* =================================================================
+   Detail action toolbar (Add stock / Remove / Reconcile)
+   ================================================================= */
+
+.pk-detail-actions {
+    background: #f7f9fa !important;
+    border-bottom: 1px solid #d8dde2 !important;
+    padding: 4px 6px !important;
+}
+
+/* Green = additive action (per the partkeepr-ng button color convention).
+   The selectors target Webix's button structure so :hover and :active still
+   work — we only override colors. */
+.pk-btn-add .webix_button,
+.pk-btn-add button {
+    background: #2d8b48 !important;
+    color: #fff !important;
+    border-color: #246d39 !important;
+}
+.pk-btn-add .webix_button:hover,
+.pk-btn-add button:hover {
+    background: #246d39 !important;
+}
+
+/* Red = removal/destructive. */
+.pk-btn-remove .webix_button,
+.pk-btn-remove button {
+    background: #b03030 !important;
+    color: #fff !important;
+    border-color: #8c2424 !important;
+}
+.pk-btn-remove .webix_button:hover,
+.pk-btn-remove button:hover {
+    background: #8c2424 !important;
+}
+
+/* =================================================================
+   Stock dialog
+   ================================================================= */
+
+.pk-stock-dialog .webix_win_head {
+    background: #2a3f54;
+    color: #fff;
+}
+
+.pk-dialog-header {
+    background: #f5f7f9 !important;
+    border-bottom: 1px solid #e0e6ec !important;
+}
+
+.pk-dialog-part-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2933;
+    padding: 4px 12px 0 12px;
+}
+
+.pk-dialog-subtitle {
+    font-size: 12px;
+    color: #6a7a8a;
+    padding: 0 12px 4px 12px;
+}
+
+/* =================================================================
    Login window
    ================================================================= */
 
