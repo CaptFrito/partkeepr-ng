@@ -231,6 +231,78 @@
             if (!r.ok) throw new Error(`move storage location failed: ${r.status} ${await r.text()}`);
             return r.json();
         },
+
+        // Footprint categories
+        async createFootprintCategory(body) {
+            const r = await fetch("/api/footprint_categories", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create footprint cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateFootprintCategory(id, body) {
+            const r = await fetch(`/api/footprint_categories/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update footprint cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteFootprintCategory(id) {
+            const r = await fetch(`/api/footprint_categories/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete footprint cat failed: ${r.status} ${await r.text()}`);
+        },
+        async moveFootprintCategory(id, newParentId) {
+            const r = await fetch(`/api/footprint_categories/${id}/move`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ new_parent_id: newParentId }),
+            });
+            if (!r.ok) throw new Error(`move footprint cat failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async footprintCategoryById(id) {
+            const r = await fetch("/api/footprint_categories");
+            if (!r.ok) return null;
+            const flat = await r.json();
+            return flat.find((c) => c.id === id) || null;
+        },
+
+        // Footprints (leaves)
+        async createFootprint(body) {
+            const r = await fetch("/api/footprints", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create footprint failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateFootprint(id, body) {
+            const r = await fetch(`/api/footprints/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update footprint failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteFootprint(id) {
+            const r = await fetch(`/api/footprints/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete footprint failed: ${r.status} ${await r.text()}`);
+        },
+        async moveFootprint(id, newCategoryId) {
+            const r = await fetch(`/api/footprints/${id}/move`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ new_category_id: newCategoryId }),
+            });
+            if (!r.ok) throw new Error(`move footprint failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async footprintById(id) {
+            const r = await fetch("/api/footprints");
+            if (!r.ok) return null;
+            const flat = await r.json();
+            return flat.find((f) => f.id === id) || null;
+        },
     };
 
     // ============================================================
@@ -402,7 +474,10 @@
                             id: "tab-storage",
                             rows: [buildStorageActionToolbar(), buildStorageTreeView()],
                         },
-                        { id: "tab-footprints", rows: [buildFootprintTreeView()] },
+                        {
+                            id: "tab-footprints",
+                            rows: [buildFootprintActionToolbar(), buildFootprintTreeView()],
+                        },
                         { id: "tab-lookups", rows: [buildLookupsStub()] },
                     ],
                 },
@@ -1176,6 +1251,299 @@
             out.open = node.lvl === 0;
         }
         return out;
+    }
+
+    // --- Footprint CRUD toolbar + dialogs ---
+
+    function buildFootprintActionToolbar() {
+        return {
+            view: "toolbar",
+            css: "pk-pane-toolbar",
+            height: 38,
+            cols: [
+                { view: "button", value: "+ Sub", css: "pk-btn-add", width: 60, click: openFootprintCategoryAdd },
+                { view: "button", value: "+ FP", css: "pk-btn-add", width: 56, click: openFootprintAdd },
+                { view: "button", value: "✎", css: "webix_primary", width: 36, click: openFootprintEdit },
+                { view: "button", value: "Move…", width: 70, click: openFootprintMove },
+                { view: "button", value: "🗑", css: "pk-btn-remove", width: 36, click: confirmFootprintDelete },
+                {},
+            ],
+        };
+    }
+
+    function getFootprintContextCategoryId() {
+        const tree = $$("pk-footprint-tree");
+        if (!tree) return null;
+        const id = tree.getSelectedId();
+        if (!id) return null;
+        const node = tree.getItem(id);
+        if (!node) return null;
+        if (node.kind === "folder") return node.category_id;
+        if (node.kind === "leaf") {
+            const parentId = tree.getParentId(id);
+            if (!parentId) return null;
+            const parent = tree.getItem(parentId);
+            return parent ? parent.category_id : null;
+        }
+        return null;
+    }
+
+    async function reloadFootprintTreeAndGrid(reselectId) {
+        try {
+            const arr = await api.footprintTree();
+            const tree = $$("pk-footprint-tree");
+            tree.clearAll();
+            tree.parse(arr.map(transformFootprintNode));
+            if (reselectId && tree.exists(reselectId)) {
+                tree.select(reselectId);
+                tree.open(reselectId);
+            } else if (arr.length) {
+                tree.open(transformFootprintNode(arr[0]).id);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        await loadParts({});
+    }
+
+    function openFootprintCategoryAdd() {
+        const parentId = getFootprintContextCategoryId();
+        if (parentId == null) {
+            webix.message({ type: "error", text: "Select a footprint folder first." });
+            return;
+        }
+        showSimpleNameDescDialog({
+            title: "New footprint sub-category",
+            saveLabel: "Create",
+            initial: { name: "", description: "" },
+            onSave: async (v) => {
+                const created = await api.createFootprintCategory({
+                    parent_id: parentId,
+                    name: v.name,
+                    description: v.description || null,
+                });
+                await reloadFootprintTreeAndGrid("fcat:" + created.id);
+            },
+        });
+    }
+
+    function openFootprintAdd() {
+        const parentId = getFootprintContextCategoryId();
+        if (parentId == null) {
+            webix.message({ type: "error", text: "Select a footprint folder first." });
+            return;
+        }
+        showSimpleNameDescDialog({
+            title: "New footprint",
+            saveLabel: "Create",
+            initial: { name: "", description: "" },
+            onSave: async (v) => {
+                const created = await api.createFootprint({
+                    category_id: parentId,
+                    name: v.name,
+                    description: v.description || null,
+                });
+                await reloadFootprintTreeAndGrid("fp:" + created.id);
+            },
+        });
+    }
+
+    async function openFootprintEdit() {
+        const tree = $$("pk-footprint-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a footprint folder or footprint to edit." });
+            return;
+        }
+        if (node.kind === "folder") {
+            if (node.lvl === 0) {
+                webix.message({ type: "error", text: "The root footprint category cannot be renamed." });
+                return;
+            }
+            const full = await api.footprintCategoryById(node.category_id);
+            showSimpleNameDescDialog({
+                title: `Edit footprint category "${node.value}"`,
+                saveLabel: "Save",
+                initial: { name: node.value, description: (full && full.description) || "" },
+                onSave: async (v) => {
+                    await api.updateFootprintCategory(node.category_id, {
+                        name: v.name,
+                        description: v.description || null,
+                    });
+                    await reloadFootprintTreeAndGrid("fcat:" + node.category_id);
+                },
+            });
+        } else {
+            // leaf — footprint with name + description
+            const full = await api.footprintById(node.footprint_id);
+            showSimpleNameDescDialog({
+                title: `Edit footprint "${node.value}"`,
+                saveLabel: "Save",
+                initial: { name: node.value, description: (full && full.description) || "" },
+                onSave: async (v) => {
+                    await api.updateFootprint(node.footprint_id, {
+                        name: v.name,
+                        description: v.description || null,
+                    });
+                    await reloadFootprintTreeAndGrid("fp:" + node.footprint_id);
+                },
+            });
+        }
+    }
+
+    function confirmFootprintDelete() {
+        const tree = $$("pk-footprint-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a footprint folder or footprint to delete." });
+            return;
+        }
+        if (node.kind === "folder" && node.lvl === 0) {
+            webix.message({ type: "error", text: "The root footprint category cannot be deleted." });
+            return;
+        }
+        const what = node.kind === "folder" ? "footprint category" : "footprint";
+        webix.confirm({
+            title: `Delete ${what}`,
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text:
+                `Delete ${what} <b>${escapeHtml(node.value)}</b>?<br><br>` +
+                (node.kind === "folder"
+                    ? "Refused if it contains footprints or sub-categories."
+                    : "Refused if any parts reference this footprint."),
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    if (node.kind === "folder") {
+                        await api.deleteFootprintCategory(node.category_id);
+                    } else {
+                        await api.deleteFootprint(node.footprint_id);
+                    }
+                    await reloadFootprintTreeAndGrid();
+                    webix.message({ text: `${what} deleted`, type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function openFootprintMove() {
+        const tree = $$("pk-footprint-tree");
+        const node = tree && tree.getSelectedId() ? tree.getItem(tree.getSelectedId()) : null;
+        if (!node) {
+            webix.message({ type: "error", text: "Select a footprint folder or footprint to move." });
+            return;
+        }
+        if (node.kind === "folder" && node.lvl === 0) {
+            webix.message({ type: "error", text: "The root footprint category cannot be moved." });
+            return;
+        }
+        const isFolder = node.kind === "folder";
+        showFootprintPickerDialog({
+            title: isFolder
+                ? `Move "${node.value}" to…`
+                : `Move footprint "${node.value}" to…`,
+            hint: "Pick a new parent footprint category:",
+            excludeCategoryId: isFolder ? node.category_id : null,
+            onPick: async (newCatId) => {
+                if (isFolder) {
+                    await api.moveFootprintCategory(node.category_id, newCatId);
+                    await reloadFootprintTreeAndGrid("fcat:" + node.category_id);
+                } else {
+                    await api.moveFootprint(node.footprint_id, newCatId);
+                    await reloadFootprintTreeAndGrid("fp:" + node.footprint_id);
+                }
+            },
+        });
+    }
+
+    function transformFootprintCategoryOnly(node) {
+        const out = {
+            id: "fcat:" + node.id,
+            value: node.name,
+            kind: "folder",
+            lvl: node.lvl,
+            category_id: node.id,
+        };
+        if (node.children && node.children.length) {
+            out.data = node.children.map(transformFootprintCategoryOnly);
+            out.open = node.lvl === 0;
+        }
+        return out;
+    }
+
+    function showFootprintPickerDialog(opts) {
+        function exclude(arr, excludedId) {
+            if (excludedId == null) return arr;
+            return arr
+                .filter((n) => "fcat:" + n.id !== excludedId)
+                .map((n) => Object.assign({}, n, {
+                    children: n.children ? exclude(n.children, excludedId) : [],
+                }));
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-footprint-picker",
+            modal: true,
+            position: "center",
+            width: 460,
+            height: 560,
+            head: opts.title,
+            body: {
+                rows: [
+                    { template: opts.hint, height: 32, css: "pk-dialog-hint", borderless: true },
+                    {
+                        view: "tree",
+                        id: "pk-footprint-picker-tree",
+                        select: true,
+                        template: treeNodeTemplate,
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 48,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-footprint-picker").close() },
+                            {
+                                view: "button",
+                                value: "Move",
+                                width: 90,
+                                css: "webix_primary",
+                                click: async function () {
+                                    const t = $$("pk-footprint-picker-tree");
+                                    const targetId = t.getSelectedId();
+                                    if (!targetId) {
+                                        webix.message({ type: "error", text: "Pick a target category" });
+                                        return;
+                                    }
+                                    const targetNode = t.getItem(targetId);
+                                    try {
+                                        await opts.onPick(targetNode.category_id);
+                                        $$("pk-footprint-picker").close();
+                                        webix.message({ text: "Moved", type: "success" });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Move failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        api.footprintTree().then((arr) => {
+            const cleaned = exclude(arr, opts.excludeCategoryId ? "fcat:" + opts.excludeCategoryId : null);
+            const t = $$("pk-footprint-picker-tree");
+            t.clearAll();
+            t.parse(cleaned.map(transformFootprintCategoryOnly));
+            if (cleaned.length) t.open("fcat:" + cleaned[0].id);
+        });
     }
 
     // --- Lookups stub (W5e will populate this) ---
