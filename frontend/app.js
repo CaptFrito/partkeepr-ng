@@ -4232,59 +4232,62 @@
     function openPresetsMenu(toolbarButton) {
         loadGridPresets(PARTS_GRID, /*force=*/ true)
             .then((presets) => {
-                const items = [];
+                // Close a previously-opened menu before building a new
+                // one — otherwise the duplicate id throws.
+                const old = $$("pk-presets-popup");
+                if (old) old.destructor();
+
+                const data = [];
                 if (presets.length === 0) {
-                    items.push({ id: "_empty", value: "(no saved presets)", $css: "pk-help-hint" });
+                    data.push({ id: "_empty", value: "(no saved presets)", $css: "pk-help-hint" });
                 } else {
                     for (const p of presets) {
-                        const star = p.grid_default ? "★ " : "  ";
-                        items.push({
+                        const star = p.grid_default ? "★ " : "&nbsp;&nbsp;";
+                        data.push({
                             id: "apply:" + p.id,
-                            value: star + escapeHtml(p.name),
+                            value: star + " " + escapeHtml(p.name),
                         });
                     }
                 }
-                items.push({ $template: "Separator" });
-                items.push({ id: "save", value: "+ Save current as preset…" });
-                items.push({ id: "manage", value: "✎ Manage presets…" });
+                data.push({ $template: "Separator" });
+                data.push({ id: "save", value: "+ Save current as preset…" });
+                data.push({ id: "manage", value: "✎ Manage presets…" });
 
-                webix.ui({
-                    view: "popup",
+                const menu = webix.ui({
+                    view: "contextmenu",
                     id: "pk-presets-popup",
                     width: 240,
-                    body: {
-                        view: "list",
-                        autoheight: true,
-                        select: false,
-                        data: items,
-                        type: { height: 30 },
-                        template: function (o) {
-                            if (o.$template === "Separator") return "";
-                            return o.value;
-                        },
-                        on: {
-                            onItemClick: function (id) {
-                                $$("pk-presets-popup").close();
-                                if (id === "_empty") return;
-                                if (id === "save") { openSavePresetDialog(PARTS_GRID); return; }
-                                if (id === "manage") { openManagePresetsDialog(PARTS_GRID); return; }
-                                if (typeof id === "string" && id.startsWith("apply:")) {
-                                    const pid = parseInt(id.slice(6), 10);
-                                    const found = (gridPresetsCache[PARTS_GRID] || [])
-                                        .find((p) => p.id === pid);
-                                    if (found) {
-                                        applyGridPreset(found, true);
-                                        webix.message({ type: "success", text: `Preset "${found.name}" applied` });
-                                    }
+                    autoheight: true,
+                    data: data,
+                    on: {
+                        onMenuItemClick: function (id) {
+                            if (id === "_empty") return;
+                            if (id === "save") { openSavePresetDialog(PARTS_GRID); return; }
+                            if (id === "manage") { openManagePresetsDialog(PARTS_GRID); return; }
+                            if (typeof id === "string" && id.startsWith("apply:")) {
+                                const pid = parseInt(id.slice(6), 10);
+                                const found = (gridPresetsCache[PARTS_GRID] || [])
+                                    .find((p) => p.id === pid);
+                                if (found) {
+                                    applyGridPreset(found, true);
+                                    webix.message({ type: "success", text: `Preset "${found.name}" applied` });
                                 }
-                            },
+                            }
                         },
                     },
-                }).show(toolbarButton.$view);
+                });
+                // Position below the toolbar button.
+                const node = toolbarButton && toolbarButton.$view;
+                if (node) {
+                    const r = node.getBoundingClientRect();
+                    menu.show({ x: r.left, y: r.bottom });
+                } else {
+                    menu.show();
+                }
             })
             .catch((e) => {
-                console.error(e);
-                webix.message({ type: "error", text: "Failed to load presets" });
+                console.error("openPresetsMenu:", e);
+                webix.message({ type: "error", text: "Failed to load presets: " + (e && e.message ? e.message : String(e)) });
             });
     }
 
