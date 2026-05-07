@@ -242,6 +242,34 @@
     border-top: 1px solid #d8dde2 !important;
 }
 
+/* Projects left-pane list */
+.pk-projects-list .webix_list_item {
+    border-bottom: 1px solid #eef1f3;
+    padding: 6px 10px !important;
+}
+
+.pk-projects-name {
+    font-weight: 600;
+    color: #1f2933;
+    font-size: 13px;
+}
+
+.pk-projects-meta {
+    color: #6a7a8a;
+    font-weight: 400;
+    font-size: 11px;
+    margin-left: 8px;
+}
+
+.pk-projects-desc {
+    color: #6a7a8a;
+    font-size: 11px;
+    margin-top: 2px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
 /* Lookups left-pane list */
 .pk-lookups-list .webix_list_item {
     font-size: 13px;

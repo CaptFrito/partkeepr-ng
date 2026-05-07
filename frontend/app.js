@@ -364,6 +364,38 @@
             const r = await fetch(`/api/attachments/${kind}/${id}`, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete attachment failed: ${r.status} ${await r.text()}`);
         },
+
+        // Projects
+        async listProjects() {
+            const r = await fetch("/api/projects");
+            if (!r.ok) throw new Error(`projects list failed: ${r.status}`);
+            return r.json();
+        },
+        async projectById(id) {
+            const r = await fetch(`/api/projects/${id}`);
+            if (!r.ok) throw new Error(`project ${id} failed: ${r.status}`);
+            return r.json();
+        },
+        async createProject(body) {
+            const r = await fetch("/api/projects", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create project failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async updateProject(id, body) {
+            const r = await fetch(`/api/projects/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update project failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async deleteProject(id) {
+            const r = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete project failed: ${r.status} ${await r.text()}`);
+        },
     };
 
     // ============================================================
@@ -478,11 +510,16 @@
         $$("pk-left-tabbar").attachEvent("onChange", function (newId) {
             if (newId === "tab-storage") loadStorageTree();
             else if (newId === "tab-footprints") loadFootprintTree();
-            // Swap center cell:
+            else if (newId === "tab-projects") loadProjectsList();
+            // Swap center cell to match the left-pane mode:
             //   tree tabs (categories/storage/footprints) → parts grid
-            //   lookups tab → lookups grid (showLookupType handles the swap
-            //                                 when the user picks a type)
-            if (newId !== "tab-lookups") {
+            //   projects                                   → project view
+            //   lookups                                    → lookups grid
+            //                                                (showLookupType swaps it)
+            if (newId === "tab-projects") {
+                const cell = $$("centerpane-project");
+                if (cell) cell.show();
+            } else if (newId !== "tab-lookups") {
                 const cell = $$("centerpane-grid");
                 if (cell) cell.show();
             }
@@ -530,6 +567,7 @@
                         { value: "Categories", id: "tab-categories" },
                         { value: "Storage", id: "tab-storage" },
                         { value: "Footprints", id: "tab-footprints" },
+                        { value: "Projects", id: "tab-projects" },
                         { value: "Lookups", id: "tab-lookups" },
                     ],
                 },
@@ -549,6 +587,7 @@
                             id: "tab-footprints",
                             rows: [buildFootprintActionToolbar(), buildFootprintTreeView()],
                         },
+                        { id: "tab-projects", rows: [buildProjectsListView()] },
                         { id: "tab-lookups", rows: [buildLookupsStub()] },
                     ],
                 },
@@ -1835,6 +1874,313 @@
         });
     }
 
+    // --- Projects left-pane list ---
+
+    function buildProjectsListView() {
+        return {
+            rows: [
+                {
+                    view: "toolbar",
+                    css: "pk-pane-toolbar",
+                    height: 38,
+                    cols: [
+                        { view: "button", value: "+ Project", css: "pk-btn-add", width: 110, click: openProjectAdd },
+                        {},
+                    ],
+                },
+                {
+                    view: "list",
+                    id: "pk-projects-list",
+                    css: "pk-projects-list",
+                    select: true,
+                    template: function (o) {
+                        const desc = o.description ? `<div class="pk-projects-desc">${escapeHtml(o.description)}</div>` : "";
+                        const meta = [];
+                        if (o.parts_count != null) meta.push(`${o.parts_count} parts`);
+                        if (o.runs_count) meta.push(`${o.runs_count} runs`);
+                        if (o.last_run_at) meta.push(`last ${o.last_run_at.substring(0, 10)}`);
+                        const metaHtml = meta.length
+                            ? `<span class="pk-projects-meta">${meta.join(" · ")}</span>`
+                            : "";
+                        return `<div class="pk-projects-name">${escapeHtml(o.name)}${metaHtml}</div>${desc}`;
+                    },
+                    type: { height: 56 },
+                    on: {
+                        onAfterSelect: function (id) {
+                            loadProjectIntoCenter(id);
+                        },
+                    },
+                },
+            ],
+        };
+    }
+
+    let projectsListLoaded = false;
+    async function loadProjectsList(force) {
+        if (projectsListLoaded && !force) return;
+        try {
+            const rows = await api.listProjects();
+            const list = $$("pk-projects-list");
+            list.clearAll();
+            list.parse(rows);
+            projectsListLoaded = true;
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load projects" });
+        }
+    }
+
+    // --- Project center pane ---
+
+    let currentProject = null;  // most recently loaded project detail
+
+    function buildProjectCenterRows() {
+        return [
+            {
+                view: "toolbar",
+                css: "pk-pane-toolbar",
+                height: 40,
+                cols: [
+                    { view: "label", id: "pk-project-title", label: "Project", css: "pk-pane-title" },
+                    {},
+                    { view: "button", value: "✎ Edit", css: "webix_primary", width: 90, click: openProjectEdit },
+                    { view: "button", value: "🗑 Delete", css: "pk-btn-remove", width: 100, click: confirmProjectDelete },
+                ],
+            },
+            {
+                view: "scrollview",
+                id: "pk-project-scroll",
+                scroll: "y",
+                body: {
+                    id: "pk-project-body",
+                    template: '<div class="pk-detail-empty">Select a project from the left.</div>',
+                    autoheight: true,
+                },
+            },
+        ];
+    }
+
+    async function loadProjectIntoCenter(projectId) {
+        try {
+            const proj = await api.projectById(projectId);
+            currentProject = proj;
+            $$("pk-project-title").setValue(`Project: ${escapeHtml(proj.name)}`);
+            $$("pk-project-body").setHTML(renderProjectHtml(proj));
+            // Make sure the multiview cell is visible.
+            const cell = $$("centerpane-project");
+            if (cell) cell.show();
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load project" });
+        }
+    }
+
+    function renderProjectHtml(p) {
+        const sections = [];
+
+        // Header
+        sections.push(`
+            <div class="pk-detail-section pk-detail-header">
+                <div class="pk-detail-name">${escapeHtml(p.name)}</div>
+                ${p.description ? `<div class="pk-detail-desc">${escapeHtml(p.description)}</div>` : ""}
+            </div>
+        `);
+
+        // BOM (read-only for now — W7b adds CRUD)
+        if (p.parts && p.parts.length) {
+            const rows = p.parts.map((bp) => `
+                <tr>
+                    <td>${escapeHtml(bp.part_name || "")}</td>
+                    <td>${escapeHtml(bp.part_internal_part_number || "")}</td>
+                    <td class="pk-numeric">${bp.quantity}</td>
+                    <td>${escapeHtml(bp.overage_type || "")}${bp.overage ? ` (${bp.overage})` : ""}</td>
+                    <td>${escapeHtml(bp.lot_number || "")}</td>
+                    <td>${escapeHtml(bp.remarks || "")}</td>
+                    <td class="pk-numeric">${bp.part_stock_level != null ? bp.part_stock_level : ""}</td>
+                </tr>
+            `).join("");
+            sections.push(detailSectionHtml(
+                `BOM (${p.parts.length} line${p.parts.length === 1 ? "" : "s"})`,
+                `<table class="pk-detail-table">
+                    <thead><tr>
+                        <th>Part</th><th>IPN</th><th class="pk-numeric">Qty</th>
+                        <th>Overage</th><th>Lot</th><th>Remarks</th><th class="pk-numeric">Stock</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <p class="pk-help-hint">BOM editing lands in W7b · Run dialog in W7c</p>`
+            ));
+        } else {
+            sections.push(detailSectionHtml("BOM", `<p class="pk-help-hint">No BOM lines yet (editor lands in W7b).</p>`));
+        }
+
+        // Attachments
+        if (p.attachments && p.attachments.length) {
+            const rows = p.attachments.map((a) => {
+                const tag = a.is_image ? "img" : "doc";
+                const size = a.size ? `${(a.size / 1024).toFixed(1)} KB` : "";
+                const url = `/files/ProjectAttachment/${a.id}`;
+                return `<tr>
+                    <td><a href="${url}" target="_blank">${escapeHtml(a.original_filename || a.filename)}</a></td>
+                    <td>${tag}</td>
+                    <td class="pk-numeric">${escapeHtml(size)}</td>
+                </tr>`;
+            }).join("");
+            sections.push(detailSectionHtml(
+                `Attachments (${p.attachments.length})`,
+                `<table class="pk-detail-table"><thead><tr><th>File</th><th>Type</th><th>Size</th></tr></thead><tbody>${rows}</tbody></table>`
+            ));
+        }
+
+        sections.push(detailSectionHtml(
+            "Runs",
+            `<p class="pk-help-hint">${p.runs_count} run${p.runs_count === 1 ? "" : "s"} on record · run dialog + history land in W7c</p>`
+        ));
+
+        return sections.join("");
+    }
+
+    // --- Project add/edit/delete ---
+
+    function openProjectAdd() {
+        openProjectEditor("new", null);
+    }
+
+    function openProjectEdit() {
+        if (!currentProject) {
+            webix.message({ type: "error", text: "Select a project first." });
+            return;
+        }
+        openProjectEditor("edit", currentProject);
+    }
+
+    function confirmProjectDelete() {
+        if (!currentProject) {
+            webix.message({ type: "error", text: "Select a project first." });
+            return;
+        }
+        const p = currentProject;
+        webix.confirm({
+            title: "Delete project",
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text: `Delete project <b>${escapeHtml(p.name)}</b>? Refused if any runs exist (run history is append-only).`,
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    await api.deleteProject(p.id);
+                    currentProject = null;
+                    $$("pk-project-title").setValue("Project");
+                    $$("pk-project-body").setHTML('<div class="pk-detail-empty">Select a project from the left.</div>');
+                    await loadProjectsList(true);
+                    webix.message({ text: "Project deleted", type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function openProjectEditor(mode, existing) {
+        const isEdit = mode === "edit";
+        const projId = isEdit && existing ? existing.id : null;
+        const seed = existing || { name: "", description: "" };
+
+        const tabs = [
+            {
+                header: "Identity",
+                body: {
+                    rows: [
+                        { view: "text", name: "name", label: "Name", labelWidth: 110, required: true },
+                        { view: "textarea", name: "description", label: "Description", labelWidth: 110, height: 100 },
+                        {},
+                    ],
+                },
+            },
+        ];
+        if (isEdit) {
+            tabs.push({
+                header: "Attachments",
+                body: buildAttachmentsSection({
+                    tableId: "pk-project-attachments",
+                    uploaderId: "pk-project-attachments-uploader",
+                    kind: "ProjectAttachment",
+                    getParentId: () => projId,
+                }),
+            });
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-project-editor",
+            modal: true,
+            position: "center",
+            width: 720,
+            height: 540,
+            head: isEdit ? `Edit project "${existing.name}"` : "New project",
+            body: {
+                view: "form",
+                id: "pk-project-editor-form",
+                elements: [
+                    { view: "tabview", cells: tabs },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-project-editor").close() },
+                            {
+                                view: "button",
+                                value: isEdit ? "Save" : "Create",
+                                width: 110,
+                                css: isEdit ? "webix_primary" : "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-project-editor-form").getValues();
+                                    if (!v.name || !v.name.trim()) {
+                                        webix.message({ type: "error", text: "Name is required" });
+                                        return;
+                                    }
+                                    const body = {
+                                        name: v.name.trim(),
+                                        description: (v.description || "").trim() || null,
+                                    };
+                                    try {
+                                        let savedId;
+                                        if (isEdit) {
+                                            await api.updateProject(existing.id, body);
+                                            savedId = existing.id;
+                                        } else {
+                                            const created = await api.createProject(body);
+                                            savedId = created.id;
+                                        }
+                                        $$("pk-project-editor").close();
+                                        await loadProjectsList(true);
+                                        await loadProjectIntoCenter(savedId);
+                                        const list = $$("pk-projects-list");
+                                        if (list && list.exists(savedId)) list.select(savedId);
+                                        webix.message({ text: "Saved", type: "success" });
+                                        if (!isEdit) {
+                                            // Re-open in edit mode so the operator can attach files immediately.
+                                            const fresh = await api.projectById(savedId);
+                                            openProjectEditor("edit", fresh);
+                                        }
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-project-editor-form").setValues(seed);
+
+        if (isEdit) {
+            refreshAttachments({ tableId: "pk-project-attachments", kind: "ProjectAttachment", getParentId: () => projId });
+        }
+    }
+
     // --- Lookups left-pane list ---
 
     function buildLookupsStub() {
@@ -1875,6 +2221,7 @@
             cells: [
                 { id: "centerpane-grid", rows: buildPartsGridRows() },
                 { id: "centerpane-lookups", rows: buildLookupsCenterRows() },
+                { id: "centerpane-project", rows: buildProjectCenterRows() },
             ],
         };
     }
