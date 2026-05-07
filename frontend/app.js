@@ -303,6 +303,34 @@
             const flat = await r.json();
             return flat.find((f) => f.id === id) || null;
         },
+
+        // Generic CRUD for the 5 flat lookups. URL paths and write shapes
+        // are configured in the LOOKUP_TYPES table below.
+        async lookupList(url) {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`${url} failed: ${r.status}`);
+            return r.json();
+        },
+        async lookupCreate(url, body) {
+            const r = await fetch(url, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async lookupUpdate(url, id, body) {
+            const r = await fetch(`${url}/${id}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
+        async lookupDelete(url, id) {
+            const r = await fetch(`${url}/${id}`, { method: "DELETE" });
+            if (!r.ok) throw new Error(`delete failed: ${r.status} ${await r.text()}`);
+        },
     };
 
     // ============================================================
@@ -411,10 +439,20 @@
 
         // Lazy-load the other trees the first time the user switches to
         // them. Webix tabbar with multiview:true auto-fires onChange when
-        // the active cell changes; we just hook for the side effect.
+        // the active cell changes; we hook for two reasons:
+        //   1. trigger the lazy load
+        //   2. swap the center pane between parts grid and lookups grid
         $$("pk-left-tabbar").attachEvent("onChange", function (newId) {
             if (newId === "tab-storage") loadStorageTree();
             else if (newId === "tab-footprints") loadFootprintTree();
+            // Swap center cell:
+            //   tree tabs (categories/storage/footprints) → parts grid
+            //   lookups tab → lookups grid (showLookupType handles the swap
+            //                                 when the user picks a type)
+            if (newId !== "tab-lookups") {
+                const cell = $$("centerpane-grid");
+                if (cell) cell.show();
+            }
         });
     }
 
@@ -1546,15 +1584,27 @@
         });
     }
 
-    // --- Lookups stub (W5e will populate this) ---
+    // --- Lookups left-pane list ---
 
     function buildLookupsStub() {
         return {
-            template:
-                '<div class="pk-detail-empty" style="padding:20px">' +
-                '<b>Lookups</b><br><br>' +
-                'Manufacturer / Distributor / PartUnit / Unit / SiPrefix editing ' +
-                'lands here in W5e.</div>',
+            view: "list",
+            id: "pk-lookups-list",
+            css: "pk-lookups-list",
+            select: true,
+            template: function (o) {
+                return `<span class="pk-lookups-icon">▤</span> ${escapeHtml(o.value)}`;
+            },
+            data: [
+                { id: "manufacturers", value: "Manufacturers" },
+                { id: "distributors", value: "Distributors" },
+                { id: "part_units", value: "Part Units" },
+                { id: "units", value: "Units (parametric)" },
+                { id: "si_prefixes", value: "SI Prefixes" },
+            ],
+            on: {
+                onAfterSelect: function (id) { showLookupType(id); },
+            },
         };
     }
 
@@ -1570,7 +1620,16 @@
     function buildCenterPane() {
         return {
             id: "pk-center",
-            rows: [
+            view: "multiview",
+            cells: [
+                { id: "centerpane-grid", rows: buildPartsGridRows() },
+                { id: "centerpane-lookups", rows: buildLookupsCenterRows() },
+            ],
+        };
+    }
+
+    function buildPartsGridRows() {
+        return [
                 {
                     view: "toolbar",
                     css: "pk-pane-toolbar",
@@ -1685,8 +1744,356 @@
                     label: "",
                     height: 22,
                 },
+            ];
+    }
+
+    // ============================================================
+    //  Lookups CRUD — center pane content + per-type definitions
+    // ============================================================
+
+    // Configuration table: each lookup type knows its endpoint, list
+    // columns to render, and how to seed/format an edit dialog.
+    const LOOKUP_TYPES = {
+        manufacturers: {
+            label: "Manufacturers",
+            url: "/api/manufacturers",
+            columns: [
+                { id: "name", header: "Name", fillspace: true, sort: "string" },
+                { id: "url", header: "URL", width: 220, sort: "string" },
+                { id: "email", header: "Email", width: 200, sort: "string" },
+                { id: "phone", header: "Phone", width: 130, sort: "string" },
+                { id: "part_count", header: { text: "Parts", css: "pk-th-numeric" }, width: 70, sort: "int", css: "pk-numeric" },
             ],
-        };
+            buildEdit: (existing) => ({
+                title: existing ? `Edit manufacturer "${existing.name}"` : "New manufacturer",
+                fields: [
+                    { kind: "text", name: "name", label: "Name", required: true },
+                    { kind: "text", name: "url", label: "URL" },
+                    { kind: "text", name: "email", label: "Email" },
+                    { kind: "text", name: "phone", label: "Phone" },
+                    { kind: "text", name: "fax", label: "Fax" },
+                    { kind: "textarea", name: "address", label: "Address", height: 60 },
+                    { kind: "textarea", name: "comment", label: "Comment", height: 60 },
+                ],
+                seed: existing || { name: "", url: "", email: "", phone: "", fax: "", address: "", comment: "" },
+                serialize: (v) => ({
+                    name: v.name.trim(),
+                    url: (v.url || "").trim() || null,
+                    email: (v.email || "").trim() || null,
+                    phone: (v.phone || "").trim() || null,
+                    fax: (v.fax || "").trim() || null,
+                    address: (v.address || "").trim() || null,
+                    comment: (v.comment || "").trim() || null,
+                }),
+            }),
+        },
+        distributors: {
+            label: "Distributors",
+            url: "/api/distributors",
+            columns: [
+                { id: "name", header: "Name", fillspace: true, sort: "string" },
+                { id: "url", header: "URL", width: 220, sort: "string" },
+                { id: "skuurl", header: "SKU URL", width: 200, sort: "string" },
+                { id: "phone", header: "Phone", width: 130, sort: "string" },
+            ],
+            buildEdit: (existing) => ({
+                title: existing ? `Edit distributor "${existing.name}"` : "New distributor",
+                fields: [
+                    { kind: "text", name: "name", label: "Name", required: true },
+                    { kind: "text", name: "url", label: "URL" },
+                    { kind: "text", name: "skuurl", label: "SKU URL" },
+                    { kind: "text", name: "email", label: "Email" },
+                    { kind: "text", name: "phone", label: "Phone" },
+                    { kind: "text", name: "fax", label: "Fax" },
+                    { kind: "textarea", name: "address", label: "Address", height: 60 },
+                    { kind: "textarea", name: "comment", label: "Comment", height: 60 },
+                    { kind: "checkbox", name: "enabled_for_reports", labelRight: "Enabled for reports" },
+                ],
+                seed: existing || { name: "", url: "", skuurl: "", email: "", phone: "", fax: "", address: "", comment: "", enabled_for_reports: true },
+                serialize: (v) => ({
+                    name: v.name.trim(),
+                    url: (v.url || "").trim() || null,
+                    skuurl: (v.skuurl || "").trim() || null,
+                    email: (v.email || "").trim() || null,
+                    phone: (v.phone || "").trim() || null,
+                    fax: (v.fax || "").trim() || null,
+                    address: (v.address || "").trim() || null,
+                    comment: (v.comment || "").trim() || null,
+                    enabled_for_reports: !!v.enabled_for_reports,
+                }),
+            }),
+        },
+        part_units: {
+            label: "Part Units",
+            url: "/api/part_measurement_units",
+            columns: [
+                { id: "name", header: "Name", fillspace: true, sort: "string" },
+                { id: "short_name", header: "Short", width: 100, sort: "string" },
+                {
+                    id: "is_default", header: "Default", width: 80,
+                    template: (o) => o.is_default ? "<b>✓</b>" : "",
+                },
+                { id: "part_count", header: { text: "Parts", css: "pk-th-numeric" }, width: 70, sort: "int", css: "pk-numeric" },
+            ],
+            buildEdit: (existing) => ({
+                title: existing ? `Edit part unit "${existing.name}"` : "New part unit",
+                fields: [
+                    { kind: "text", name: "name", label: "Name", required: true },
+                    { kind: "text", name: "short_name", label: "Short name", required: true },
+                    { kind: "checkbox", name: "is_default", labelRight: "Default unit for new parts" },
+                ],
+                seed: existing || { name: "", short_name: "", is_default: false },
+                serialize: (v) => ({
+                    name: v.name.trim(),
+                    short_name: (v.short_name || "").trim(),
+                    is_default: !!v.is_default,
+                }),
+            }),
+        },
+        units: {
+            label: "Units (parametric)",
+            url: "/api/units",
+            columns: [
+                { id: "name", header: "Name", fillspace: true, sort: "string" },
+                { id: "symbol", header: "Symbol", width: 110, sort: "string" },
+                { id: "parameter_count", header: { text: "Used", css: "pk-th-numeric" }, width: 70, sort: "int", css: "pk-numeric" },
+            ],
+            buildEdit: (existing) => ({
+                title: existing ? `Edit unit "${existing.name}"` : "New unit",
+                fields: [
+                    { kind: "text", name: "name", label: "Name", required: true },
+                    { kind: "text", name: "symbol", label: "Symbol", required: true },
+                    // SI prefix M:M editing deferred — for now we send the
+                    // existing list back unchanged on update so we don't
+                    // wipe it out.
+                ],
+                seed: existing || { name: "", symbol: "", allowed_prefix_ids: [] },
+                serialize: (v, existing) => ({
+                    name: v.name.trim(),
+                    symbol: (v.symbol || "").trim(),
+                    allowed_prefix_ids: existing ? (existing.allowed_prefix_ids || []) : [],
+                }),
+            }),
+        },
+        si_prefixes: {
+            label: "SI Prefixes",
+            url: "/api/si_prefixes",
+            columns: [
+                { id: "prefix", header: "Prefix", fillspace: true, sort: "string" },
+                { id: "symbol", header: "Symbol", width: 90, sort: "string" },
+                { id: "base", header: { text: "Base", css: "pk-th-numeric" }, width: 70, sort: "int", css: "pk-numeric" },
+                { id: "exponent", header: { text: "Exponent", css: "pk-th-numeric" }, width: 90, sort: "int", css: "pk-numeric" },
+                { id: "parameter_count", header: { text: "Used", css: "pk-th-numeric" }, width: 70, sort: "int", css: "pk-numeric" },
+            ],
+            buildEdit: (existing) => ({
+                title: existing ? `Edit SI prefix "${existing.prefix}"` : "New SI prefix",
+                fields: [
+                    { kind: "text", name: "prefix", label: "Prefix", required: true },
+                    { kind: "text", name: "symbol", label: "Symbol", required: true },
+                    { kind: "counter", name: "base", label: "Base", min: 2, step: 1 },
+                    // Webix counter defaults min:0; exponents go negative
+                    // (yocto = -24), so allow plenty of headroom both ways.
+                    { kind: "counter", name: "exponent", label: "Exponent", min: -100, max: 100, step: 1 },
+                ],
+                seed: existing || { prefix: "", symbol: "", base: 10, exponent: 0 },
+                serialize: (v) => ({
+                    prefix: v.prefix.trim(),
+                    symbol: (v.symbol || "").trim(),
+                    base: parseInt(v.base, 10) || 10,
+                    exponent: parseInt(v.exponent, 10) || 0,
+                }),
+            }),
+        },
+    };
+
+    let currentLookupType = null;  // key into LOOKUP_TYPES
+
+    function buildLookupsCenterRows() {
+        return [
+            {
+                view: "toolbar",
+                css: "pk-pane-toolbar",
+                height: 40,
+                cols: [
+                    { view: "label", id: "pk-lookups-title", label: "Lookups", css: "pk-pane-title" },
+                    {},
+                    { view: "button", value: "+ Add", css: "pk-btn-add", width: 80, click: openLookupAdd },
+                    { view: "button", value: "✎ Edit", css: "webix_primary", width: 80, click: openLookupEdit },
+                    { view: "button", value: "🗑 Delete", css: "pk-btn-remove", width: 90, click: confirmLookupDelete },
+                ],
+            },
+            {
+                view: "datatable",
+                id: "pk-lookups-grid",
+                css: "pk-grid",
+                select: "row",
+                resizeColumn: { headerOnly: true, size: 4 },
+                columns: [],
+            },
+            {
+                view: "label",
+                id: "pk-lookups-status",
+                css: "pk-status-bar",
+                label: "",
+                height: 22,
+            },
+        ];
+    }
+
+    async function showLookupType(typeKey) {
+        const cfg = LOOKUP_TYPES[typeKey];
+        if (!cfg) return;
+        currentLookupType = typeKey;
+        $$("pk-lookups-title").setValue(cfg.label);
+        const grid = $$("pk-lookups-grid");
+        // Webix datatable's columns are mostly static; replace via refreshColumns.
+        grid.config.columns = cfg.columns;
+        grid.refreshColumns();
+        try {
+            const rows = await api.lookupList(cfg.url);
+            grid.clearAll();
+            grid.parse(rows);
+            $$("pk-lookups-status").setValue(`${rows.length} ${cfg.label.toLowerCase()}`);
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load " + cfg.label.toLowerCase() });
+        }
+        // Make sure the center pane is showing the lookups cell.
+        const cell = $$("centerpane-lookups");
+        if (cell) cell.show();
+    }
+
+    function getSelectedLookupRow() {
+        const grid = $$("pk-lookups-grid");
+        if (!grid) return null;
+        const id = grid.getSelectedId();
+        if (!id) return null;
+        const item = grid.getItem(id);
+        return item || null;
+    }
+
+    function openLookupAdd() {
+        if (!currentLookupType) return;
+        const cfg = LOOKUP_TYPES[currentLookupType];
+        const ed = cfg.buildEdit(null);
+        showLookupEditDialog({
+            title: ed.title,
+            fields: ed.fields,
+            seed: ed.seed,
+            saveLabel: "Create",
+            onSave: async (formValues) => {
+                const body = ed.serialize(formValues, null);
+                await api.lookupCreate(cfg.url, body);
+                await showLookupType(currentLookupType);
+            },
+        });
+    }
+
+    function openLookupEdit() {
+        if (!currentLookupType) return;
+        const sel = getSelectedLookupRow();
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a row to edit." });
+            return;
+        }
+        const cfg = LOOKUP_TYPES[currentLookupType];
+        const ed = cfg.buildEdit(sel);
+        showLookupEditDialog({
+            title: ed.title,
+            fields: ed.fields,
+            seed: ed.seed,
+            saveLabel: "Save",
+            onSave: async (formValues) => {
+                const body = ed.serialize(formValues, sel);
+                await api.lookupUpdate(cfg.url, sel.id, body);
+                await showLookupType(currentLookupType);
+            },
+        });
+    }
+
+    function confirmLookupDelete() {
+        if (!currentLookupType) return;
+        const sel = getSelectedLookupRow();
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a row to delete." });
+            return;
+        }
+        const cfg = LOOKUP_TYPES[currentLookupType];
+        const label = sel.name || sel.prefix || `#${sel.id}`;
+        webix.confirm({
+            title: `Delete from ${cfg.label}`,
+            type: "confirm-error",
+            ok: "Delete",
+            cancel: "Cancel",
+            text:
+                `Delete <b>${escapeHtml(label)}</b>?<br><br>` +
+                `Refused if any parts / parameters reference it.`,
+            callback: async (result) => {
+                if (!result) return;
+                try {
+                    await api.lookupDelete(cfg.url, sel.id);
+                    await showLookupType(currentLookupType);
+                    webix.message({ text: "Deleted", type: "success" });
+                } catch (e) {
+                    webix.message({ type: "error", text: "Delete failed: " + (e.message || e) });
+                }
+            },
+        });
+    }
+
+    function showLookupEditDialog(opts) {
+        const formElements = opts.fields.map((f) => {
+            if (f.kind === "text") return { view: "text", name: f.name, label: f.label, labelWidth: 140, required: !!f.required };
+            if (f.kind === "textarea") return { view: "textarea", name: f.name, label: f.label, labelWidth: 140, height: f.height || 60 };
+            if (f.kind === "checkbox") return { view: "checkbox", name: f.name, labelRight: f.labelRight || f.label, labelWidth: 140 };
+            if (f.kind === "counter") {
+                const c = { view: "counter", name: f.name, label: f.label, labelWidth: 140, step: f.step || 1 };
+                if (f.min !== undefined) c.min = f.min;
+                if (f.max !== undefined) c.max = f.max;
+                return c;
+            }
+            return { view: "text", name: f.name, label: f.label, labelWidth: 140 };
+        });
+        formElements.push({
+            cols: [
+                {},
+                { view: "button", value: "Cancel", width: 90, click: () => $$("pk-lookup-edit").close() },
+                {
+                    view: "button",
+                    value: opts.saveLabel || "Save",
+                    width: 100,
+                    css: "webix_primary",
+                    hotkey: "ctrl+s",
+                    click: async function () {
+                        const v = $$("pk-lookup-edit-form").getValues();
+                        // Validate required text fields
+                        for (const f of opts.fields) {
+                            if (f.kind === "text" && f.required && !(v[f.name] || "").trim()) {
+                                webix.message({ type: "error", text: `${f.label} is required` });
+                                return;
+                            }
+                        }
+                        try {
+                            await opts.onSave(v);
+                            $$("pk-lookup-edit").close();
+                            webix.message({ text: "Saved", type: "success" });
+                        } catch (e) {
+                            webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                        }
+                    },
+                },
+            ],
+        });
+        webix.ui({
+            view: "window",
+            id: "pk-lookup-edit",
+            modal: true,
+            position: "center",
+            width: 520,
+            head: opts.title,
+            body: { view: "form", id: "pk-lookup-edit-form", elements: formElements },
+        }).show();
+        $$("pk-lookup-edit-form").setValues(opts.seed);
     }
 
     async function loadParts(opts) {
