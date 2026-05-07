@@ -476,6 +476,11 @@
             if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
             return r.json();
         },
+        async metaMatches(metaPartId) {
+            const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
+            if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
+            return r.json();  // {items, total, limit, offset}
+        },
         async listGridPresets(grid) {
             const r = await fetch("/api/grid_presets?grid=" + encodeURIComponent(grid));
             if (!r.ok) throw new Error(`list grid presets failed: ${r.status}`);
@@ -2233,6 +2238,17 @@
 
     let runPreviewQty = 1;
 
+    // Per-line meta-part allocations (W7c.X). Keyed by project_part_id;
+    // each value is an array of {real_part_id, quantity}. Reset every
+    // time the Run dialog opens so state never leaks across projects.
+    let runAllocations = {};
+
+    // Snapshot of the most recent run preview rows, keyed by
+    // project_part_id, so the allocator dialog can read the BOM line's
+    // required `effective` qty without round-tripping through the
+    // datatable.
+    let runPreviewByPpid = {};
+
     function openRunDialog() {
         if (!currentProject) {
             webix.message({ type: "error", text: "Select a project first." });
@@ -2244,6 +2260,8 @@
         }
 
         runPreviewQty = 1;
+        runAllocations = {};
+        runPreviewByPpid = {};
 
         webix.ui({
             view: "window",
@@ -2290,6 +2308,14 @@
                         rowCss: function (o) {
                             return o.shortfall ? "pk-row-shortfall" : "";
                         },
+                        onClick: {
+                            // Status-cell "Allocate" link → open allocator
+                            "pk-allocate-link": function (ev, row) {
+                                const item = this.getItem(row);
+                                if (item) openAllocateDialog(item);
+                                return false;  // suppress default row select
+                            },
+                        },
                         columns: [
                             { id: "part_name", header: "Part", fillspace: true,
                               template: (o) => `${escapeHtml(o.part_name || "(orphan)")}${o.is_meta ? ' <span class="pk-detail-meta-tag">META</span>' : ""}` },
@@ -2299,12 +2325,8 @@
                             { id: "current_stock", header: { text: "Stock", css: "pk-th-numeric" }, width: 65, css: "pk-numeric",
                               template: (o) => o.current_stock != null ? o.current_stock : "—" },
                             {
-                                id: "shortfall_label", header: "Status", width: 110,
-                                template: (o) => {
-                                    if (o.is_meta) return '<span class="pk-stock-remove">META — needs allocation</span>';
-                                    if (o.shortfall) return `<span class="pk-stock-remove">SHORTFALL ${(o.current_stock || 0) - o.effective}</span>`;
-                                    return '<span class="pk-stock-add">OK</span>';
-                                },
+                                id: "shortfall_label", header: "Status", width: 200,
+                                template: renderRunStatusCell,
                             },
                             { id: "lot_number", header: "Lot", width: 100,
                               template: (o) => escapeHtml(o.lot_number || "") },
@@ -2342,23 +2364,332 @@
             const grid = $$("pk-run-preview");
             grid.clearAll();
             grid.parse(lines);
-            // Banner: how many shortfalls?
-            const shortfalls = lines.filter((l) => l.shortfall).length;
-            const metas = lines.filter((l) => l.is_meta).length;
-            const banner = $$("pk-run-banner");
-            if (metas > 0) {
-                banner.setValue(`<b>${metas}</b> meta-part line${metas === 1 ? "" : "s"} — backend will refuse without per-line allocations (W7c.X)`);
-                banner.show();
-            } else if (shortfalls > 0) {
-                banner.setValue(`<b>${shortfalls}</b> line${shortfalls === 1 ? "" : "s"} short — run will produce negative stock (allowed)`);
-                banner.show();
-            } else {
-                banner.hide();
-            }
+            // Snapshot: project_part_id → preview row (for the allocator)
+            runPreviewByPpid = {};
+            for (const l of lines) runPreviewByPpid[l.project_part_id] = l;
+            updateRunBanner();
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Preview failed: " + (e.message || e) });
         }
+    }
+
+    function updateRunBanner() {
+        const banner = $$("pk-run-banner");
+        if (!banner) return;
+        const lines = Object.values(runPreviewByPpid);
+        if (!lines.length) { banner.hide(); return; }
+        const shortfalls = lines.filter((l) => l.shortfall).length;
+        const metaLines = lines.filter((l) => l.is_meta);
+        const metasUnallocated = metaLines.filter((l) => !runAllocations[l.project_part_id] || runAllocations[l.project_part_id].length === 0).length;
+        if (metasUnallocated > 0) {
+            banner.setValue(`<b>${metasUnallocated}</b> meta-part line${metasUnallocated === 1 ? "" : "s"} not allocated — Run will be refused.`);
+            banner.show();
+        } else if (shortfalls > 0) {
+            banner.setValue(`<b>${shortfalls}</b> line${shortfalls === 1 ? "" : "s"} short — run will produce negative stock (allowed).`);
+            banner.show();
+        } else {
+            banner.hide();
+        }
+    }
+
+    /// Status-cell renderer for the Run dialog's preview grid. Renders
+    /// a clickable "Allocate…" link for meta lines, plus an OK/SHORTFALL
+    /// label for real lines. The click handler is wired via Webix's
+    /// onClick.<css> mechanism on the datatable (key: "pk-allocate-link").
+    function renderRunStatusCell(o) {
+        if (o.is_meta) {
+            const allocs = runAllocations[o.project_part_id] || [];
+            const sum = allocs.reduce((acc, a) => acc + (a.quantity || 0), 0);
+            const need = o.effective || 0;
+            let pill;
+            if (allocs.length === 0) {
+                pill = `<span class="pk-stock-remove">❌ Not allocated</span>`;
+            } else if (sum < need) {
+                pill = `<span style="color:#b09a3e;font-weight:600">⚠ ${sum} / ${need} (short ${need - sum})</span>`;
+            } else {
+                pill = `<span class="pk-stock-add">✓ ${sum} / ${need}</span>`;
+            }
+            const linkLabel = allocs.length ? "Edit…" : "Allocate…";
+            return `${pill} <a href="javascript:void(0)" class="pk-allocate-link pk-link-btn">${linkLabel}</a>`;
+        }
+        if (o.shortfall) return `<span class="pk-stock-remove">SHORTFALL ${(o.current_stock || 0) - o.effective}</span>`;
+        return '<span class="pk-stock-add">OK</span>';
+    }
+
+    /// Open the per-line meta-part allocator for a single BOM line.
+    /// `line` is one row from the run-preview datatable (must have
+    /// is_meta=true). Picks live in runAllocations[line.project_part_id].
+    async function openAllocateDialog(line) {
+        if (!line || !line.is_meta || !line.part_id) return;
+        const ppid = line.project_part_id;
+        const required = line.effective || 0;
+        const winId = "pk-allocate-dialog";
+
+        // Fetch matches for the meta-part. Errors here are fatal for
+        // the dialog (we have nothing to populate the picker with).
+        let matches;
+        try {
+            const resp = await api.metaMatches(line.part_id);
+            matches = resp.items || [];
+        } catch (e) {
+            webix.message({ type: "error", text: "Could not load matches: " + (e.message || e) });
+            return;
+        }
+
+        // Build the seed dataset: every match as a row with quantity 0,
+        // *then* layer in any prior allocations (for matches we set
+        // quantity; for off-match parts we append a synthetic _off row).
+        const rows = matches.map((p) => ({
+            id: "m_" + p.id,
+            real_part_id: p.id,
+            name: p.name || "",
+            internal_part_number: p.internal_part_number || "",
+            stock_level: p.stock_level != null ? p.stock_level : 0,
+            quantity: 0,
+            _off: false,
+        }));
+        const matchById = {};
+        rows.forEach((r) => { matchById[r.real_part_id] = r; });
+
+        const prior = runAllocations[ppid] || [];
+        for (const a of prior) {
+            if (matchById[a.real_part_id]) {
+                matchById[a.real_part_id].quantity = a.quantity;
+            } else {
+                rows.push({
+                    id: "o_" + a.real_part_id,
+                    real_part_id: a.real_part_id,
+                    name: a.name || `(part #${a.real_part_id})`,
+                    internal_part_number: a.internal_part_number || "",
+                    stock_level: a.stock_level != null ? a.stock_level : 0,
+                    quantity: a.quantity,
+                    _off: true,
+                });
+            }
+        }
+
+        const updateHeader = () => {
+            const grid = $$("pk-allocate-grid");
+            if (!grid) return;
+            let sum = 0;
+            grid.data.each((r) => { sum += parseInt(r.quantity, 10) || 0; });
+            const status = $$("pk-allocate-status");
+            if (!status) return;
+            let html;
+            if (sum === 0) {
+                html = `<span class="pk-stock-remove">Allocated: <b>0</b> / ${required}  ❌ none</span>`;
+            } else if (sum < required) {
+                html = `<span style="color:#b09a3e;font-weight:600">Allocated: <b>${sum}</b> / ${required}  ⚠ short ${required - sum}</span>`;
+            } else {
+                html = `<span class="pk-stock-add">Allocated: <b>${sum}</b> / ${required}  ✓</span>`;
+            }
+            status.setHTML(html);
+        };
+
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 760,
+            height: 540,
+            head: `Allocate "${escapeHtml(line.part_name || "(unnamed meta)")}"`,
+            body: {
+                rows: [
+                    {
+                        view: "template",
+                        height: 32,
+                        template: `<div style="padding:6px 12px;color:#4a5b6a">Required: <b>${required}</b> &nbsp;(${line.per_build} per build × ${runPreviewQty} build${runPreviewQty === 1 ? "" : "s"})</div>`,
+                        borderless: true,
+                    },
+                    {
+                        view: "template",
+                        id: "pk-allocate-status",
+                        height: 28,
+                        template: "",
+                        borderless: true,
+                        css: "pk-dialog-hint",
+                    },
+                    {
+                        view: "datatable",
+                        id: "pk-allocate-grid",
+                        css: "pk-grid",
+                        editable: true,
+                        editaction: "click",
+                        select: "row",
+                        rowCss: function (r) {
+                            const q = parseInt(r.quantity, 10) || 0;
+                            return (q > 0 && q > r.stock_level) ? "pk-row-shortfall" : "";
+                        },
+                        on: {
+                            onBeforeEditStart: function (state) {
+                                if (state && state.row) this.select(state.row);
+                            },
+                            onAfterEditStop: function () {
+                                updateHeader();
+                                this.refresh();
+                            },
+                        },
+                        columns: [
+                            { id: "_match", header: "Match", width: 65,
+                              template: (o) => o._off
+                                  ? '<span style="color:#884ea0">off</span>'
+                                  : '<span style="color:#1e7e34">✓</span>' },
+                            { id: "name", header: "Name", fillspace: true,
+                              template: (o) => escapeHtml(o.name || "") },
+                            { id: "internal_part_number", header: "IPN", width: 130,
+                              template: (o) => escapeHtml(o.internal_part_number || "") },
+                            { id: "stock_level", header: { text: "Stock", css: "pk-th-numeric" }, width: 75, css: "pk-numeric" },
+                            { id: "quantity", header: { text: "Allocate", css: "pk-th-numeric" }, width: 100, css: "pk-numeric",
+                              editor: "text" },
+                            { id: "_remove", header: "", width: 32,
+                              template: (o) => o._off
+                                  ? '<a href="javascript:void(0)" class="pk-link-btn" style="color:#b03030" data-remove="' + o.id + '" title="Remove">×</a>'
+                                  : "" },
+                        ],
+                        onClick: {
+                            "pk-link-btn": function (ev) {
+                                const t = ev.target;
+                                if (t && t.dataset && t.dataset.remove) {
+                                    this.remove(t.dataset.remove);
+                                    updateHeader();
+                                    return false;
+                                }
+                            },
+                        },
+                        data: rows,
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 44,
+                        cols: [
+                            { view: "label", label: "Add part not in matches:", width: 180, css: "pk-help-hint" },
+                            {
+                                view: "combo",
+                                id: "pk-allocate-extra-combo",
+                                placeholder: "Search by name / IPN…",
+                                width: 360,
+                                suggest: { body: { yCount: 10 } },
+                                options: [],
+                            },
+                            {
+                                view: "button",
+                                value: "+ Add",
+                                width: 80,
+                                css: "pk-btn-add",
+                                click: async function () {
+                                    const combo = $$("pk-allocate-extra-combo");
+                                    const v = combo.getValue();
+                                    if (!v) {
+                                        webix.message({ type: "error", text: "Pick a part first" });
+                                        return;
+                                    }
+                                    const realId = parseInt(v, 10);
+                                    if (isNaN(realId)) return;
+                                    const dt = $$("pk-allocate-grid");
+                                    if (!dt) return;
+                                    if (dt.exists("m_" + realId) || dt.exists("o_" + realId)) {
+                                        webix.message({ type: "error", text: "Already in the list" });
+                                        return;
+                                    }
+                                    // Look up the part details from the combo's options.
+                                    const opt = (combo.getList().getItem(realId)) || null;
+                                    let stock = 0, name = "", ipn = "";
+                                    if (opt) {
+                                        name = opt.name || opt.value || "";
+                                        ipn = opt.internal_part_number || "";
+                                        // Stock is on the part — fetch it once.
+                                        try {
+                                            const detail = await api.part(realId);
+                                            stock = detail.stock_level || 0;
+                                        } catch (_) {}
+                                    }
+                                    dt.add({
+                                        id: "o_" + realId,
+                                        real_part_id: realId,
+                                        name, internal_part_number: ipn,
+                                        stock_level: stock,
+                                        quantity: 0,
+                                        _off: true,
+                                    });
+                                    combo.setValue("");
+                                    updateHeader();
+                                },
+                            },
+                            {},
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$(winId).close() },
+                            {
+                                view: "button",
+                                value: "Save allocation",
+                                width: 160,
+                                css: "webix_primary",
+                                click: function () {
+                                    const dt = $$("pk-allocate-grid");
+                                    const out = [];
+                                    dt.data.each((r) => {
+                                        const q = parseInt(r.quantity, 10) || 0;
+                                        if (q > 0) {
+                                            out.push({
+                                                real_part_id: r.real_part_id,
+                                                quantity: q,
+                                                lot_number: null,
+                                                // Cosmetic — kept so re-opening the
+                                                // dialog can preserve the off-match row
+                                                // labels without round-tripping the API.
+                                                name: r.name,
+                                                internal_part_number: r.internal_part_number,
+                                                stock_level: r.stock_level,
+                                            });
+                                        }
+                                    });
+                                    if (out.length === 0) {
+                                        delete runAllocations[ppid];
+                                    } else {
+                                        runAllocations[ppid] = out;
+                                    }
+                                    $$(winId).close();
+                                    const grid = $$("pk-run-preview");
+                                    if (grid) grid.refresh();
+                                    updateRunBanner();
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        // Populate the off-match combo using the same pattern as the
+        // BOM-line picker: write to combo.getPopup().getList() rather
+        // than `define("options", ...)` (the latter doesn't refresh
+        // the suggest popup reliably across Webix versions).
+        api.parts({ limit: 1000 }).then((resp) => {
+            const combo = $$("pk-allocate-extra-combo");
+            if (!combo) return;
+            const data = (resp.items || []).map((p) => ({
+                id: p.id,
+                value: p.name + (p.internal_part_number ? " [" + p.internal_part_number + "]" : ""),
+                name: p.name,
+                internal_part_number: p.internal_part_number || "",
+            }));
+            const suggest = combo.getPopup();
+            const list = suggest.getList();
+            list.clearAll();
+            list.parse(data);
+        }).catch((e) => console.warn("part picker load failed:", e));
+
+        // First paint of the allocation header.
+        setTimeout(updateHeader, 0);
     }
 
     async function doRun() {
@@ -2367,7 +2698,19 @@
             quantity: runPreviewQty,
             comment: ($$("pk-run-comment").getValue() || "").trim() || null,
             lot_overrides: {},
-            allocations: {},
+            // Strip cosmetic fields (name, internal_part_number, stock_level)
+            // from each allocation before sending — backend only accepts
+            // {real_part_id, quantity, lot_number}.
+            allocations: Object.fromEntries(
+                Object.entries(runAllocations).map(([k, arr]) => [
+                    k,
+                    arr.map((a) => ({
+                        real_part_id: a.real_part_id,
+                        quantity: a.quantity,
+                        lot_number: a.lot_number || null,
+                    })),
+                ])
+            ),
         };
         const projectId = currentProject.id;
 
@@ -2379,21 +2722,7 @@
         } catch (e) {
             console.error(e);
             const msg = String(e.message || e);
-            if (msg.includes("meta-part")) {
-                webix.alert({
-                    title: "Run rejected",
-                    width: 540,
-                    text:
-                        '<div style="text-align:left;line-height:1.5">' +
-                        '<p>This BOM has one or more meta-part lines.</p>' +
-                        '<p>Meta-parts have no stock of their own — they need to be resolved to specific real parts at run time. ' +
-                        'The per-line allocation editor for that flow lands in W7c follow-up; for now, replace meta-parts with real parts on the BOM, or skip running this project.</p>' +
-                        `<details><summary>Server message</summary><pre>${escapeHtml(msg)}</pre></details>` +
-                        '</div>',
-                });
-            } else {
-                webix.message({ type: "error", text: "Run failed: " + msg });
-            }
+            webix.message({ type: "error", text: "Run failed: " + msg });
             return;
         }
 
