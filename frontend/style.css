@@ -6,8 +6,20 @@
     color: #f0f4f7;
 }
 
-.pk-header .webix_el_label {
-    color: #f0f4f7;
+/* Webix labels have inner spans/divs that inherit color in inconsistent
+   ways across skins; force light text on every descendant of the dark
+   toolbar so the title and user-name stay legible. */
+.pk-header .webix_el_label,
+.pk-header .webix_el_label *,
+.pk-header .webix_inp_static {
+    color: #f0f4f7 !important;
+    background: transparent;
+}
+
+.pk-header .pk-app-title {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.3px;
 }
 
 .pk-user-name {

@@ -34,11 +34,30 @@
     };
 
     // ------------------------------------------------------------
+    //  Mount management
+    //
+    //  We hold a single top-level Webix view at any time. When we
+    //  transition between login and shell, we destruct the previous
+    //  view first and mount a fresh one — Webix doesn't auto-clean
+    //  if you just re-call webix.ui() with a new config.
+    // ------------------------------------------------------------
+
+    let topView = null;
+
+    function unmount() {
+        if (topView) {
+            try { topView.destructor(); } catch (_) {}
+            topView = null;
+        }
+    }
+
+    // ------------------------------------------------------------
     //  Login window
     // ------------------------------------------------------------
 
-    function showLogin() {
-        webix.ui({
+    function mountLogin() {
+        unmount();
+        topView = webix.ui({
             view: "window",
             id: "pk-login",
             css: "pk-login-window",
@@ -51,9 +70,9 @@
                 view: "form",
                 id: "pk-login-form",
                 elements: [
-                    { view: "text", name: "username", label: "Username", labelWidth: 90, value: "" },
-                    { view: "text", type: "password", name: "password", label: "Password", labelWidth: 90, value: "" },
-                    { view: "label", id: "pk-login-error", label: "", css: "pk-login-error", hidden: true },
+                    { view: "text", name: "username", label: "Username", labelWidth: 90 },
+                    { view: "text", type: "password", name: "password", label: "Password", labelWidth: 90 },
+                    { view: "label", id: "pk-login-error", label: "", hidden: true },
                     {
                         cols: [
                             {},
@@ -69,8 +88,12 @@
                     },
                 ],
             },
-        }).show();
-        $$("pk-login-form").focus();
+        });
+        topView.show();
+        setTimeout(() => {
+            const form = $$("pk-login-form");
+            if (form) form.focus();
+        }, 0);
     }
 
     async function doLogin() {
@@ -93,27 +116,26 @@
             errLabel.show();
             return;
         }
-        $$("pk-login").close();
-        renderShell(result.body.user);
+        mountShell(result.body.user);
     }
 
     // ------------------------------------------------------------
     //  Main shell — three-column layout
     // ------------------------------------------------------------
 
-    function renderShell(user) {
-        webix.ui({
+    function mountShell(user) {
+        unmount();
+        topView = webix.ui({
             id: "pk-app",
-            type: "space",
             rows: [
                 buildHeader(user),
                 {
                     cols: [
-                        { id: "pk-left", header: "Browse", body: { template: "Left pane (W2 will populate this)" }, width: 300, view: "accordionitem" },
+                        { id: "pk-left", template: "Left pane (W2 will populate this)", width: 300 },
                         { view: "resizer" },
-                        { id: "pk-center", header: "Parts", body: { template: "Center pane (W2 will populate this)" }, view: "accordionitem" },
+                        { id: "pk-center", template: "Center pane (W2 will populate this)" },
                         { view: "resizer" },
-                        { id: "pk-right", header: "Detail", body: { template: "Right pane (W2 will populate this)" }, width: 380, view: "accordionitem" },
+                        { id: "pk-right", template: "Right pane (W2 will populate this)", width: 380 },
                     ],
                 },
             ],
@@ -122,24 +144,20 @@
 
     function buildHeader(user) {
         const adminBadge = user.is_admin ? `<span class="pk-user-admin">admin</span>` : "";
+        const userHtml = `<span class="pk-user-name">${escapeHtml(user.username)}</span>${adminBadge}`;
         return {
             view: "toolbar",
             id: "pk-header",
             css: "pk-header",
             height: 44,
             cols: [
-                { view: "label", label: "<b>PartKeeper</b>", width: 140 },
+                { view: "label", label: '<span class="pk-app-title">PartKeeper</span>', width: 160 },
                 {},
-                {
-                    view: "label",
-                    label: `<span class="pk-user-name">${escapeHtml(user.username)}</span>${adminBadge}`,
-                    width: 220,
-                    align: "right",
-                },
+                { view: "label", label: userHtml, width: 240 },
                 {
                     view: "button",
                     value: "Sign out",
-                    width: 100,
+                    width: 110,
                     click: doLogout,
                 },
             ],
@@ -148,8 +166,7 @@
 
     async function doLogout() {
         await api.logout();
-        webix.ui({}, $$("pk-app"));
-        showLogin();
+        mountLogin();
     }
 
     function escapeHtml(s) {
@@ -162,24 +179,22 @@
     //  Bootstrap
     // ------------------------------------------------------------
 
-    webix.ready(async function () {
-        webix.ui({
-            view: "layout",
-            id: "pk-app",
-            rows: [{ template: "Loading…", css: "pk-loading" }],
-        });
+    function showFatalError(e) {
+        document.body.innerHTML =
+            '<div style="font-family:sans-serif;padding:24px;color:#a33">' +
+            '<h2>PartKeeper failed to start</h2>' +
+            '<pre>' + escapeHtml(e && e.message ? e.message : String(e)) + '</pre>' +
+            '</div>';
+        console.error("[partkeepr] boot failed", e);
+    }
 
+    webix.ready(async function () {
         try {
             const me = await api.me();
-            if (me) {
-                renderShell(me);
-            } else {
-                webix.ui({}, $$("pk-app"));
-                showLogin();
-            }
+            if (me) mountShell(me);
+            else mountLogin();
         } catch (e) {
-            webix.message({ type: "error", text: "Could not reach the server." });
-            console.error(e);
+            showFatalError(e);
         }
     });
 })();
