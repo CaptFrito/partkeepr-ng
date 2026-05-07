@@ -36,14 +36,26 @@
             if (!r.ok) throw new Error(`category tree failed: ${r.status}`);
             return r.json();
         },
-        async parts({ category, search, limit = 200, offset = 0 } = {}) {
+        async parts({ filter, search, limit = 500, offset = 0 } = {}) {
             const p = new URLSearchParams();
-            if (category) p.set("category", category);
+            if (filter && filter.kind && filter.id != null) {
+                p.set(filter.kind, String(filter.id));
+            }
             if (search) p.set("search", search);
             p.set("limit", String(limit));
             p.set("offset", String(offset));
             const r = await fetch("/api/parts?" + p.toString());
             if (!r.ok) throw new Error(`parts list failed: ${r.status}`);
+            return r.json();
+        },
+        async storageTree() {
+            const r = await fetch("/api/storage_tree");
+            if (!r.ok) throw new Error(`storage tree failed: ${r.status}`);
+            return r.json();
+        },
+        async footprintTree() {
+            const r = await fetch("/api/footprint_tree");
+            if (!r.ok) throw new Error(`footprint tree failed: ${r.status}`);
             return r.json();
         },
         async part(id) {
@@ -217,6 +229,14 @@
             ],
         });
         loadCategoryTree();
+
+        // Lazy-load the other trees the first time the user switches to
+        // them. Webix tabbar with multiview:true auto-fires onChange when
+        // the active cell changes; we just hook for the side effect.
+        $$("pk-left-tabbar").attachEvent("onChange", function (newId) {
+            if (newId === "tab-storage") loadStorageTree();
+            else if (newId === "tab-footprints") loadFootprintTree();
+        });
     }
 
     function buildHeader(user) {
@@ -242,7 +262,8 @@
     }
 
     // ============================================================
-    //  Left pane — category tree
+    //  Left pane — tabbar (Categories / Storage / Footprints / Lookups)
+    //  + multiview switching the body
     // ============================================================
 
     function buildLeftPane() {
@@ -251,35 +272,57 @@
             width: 280,
             rows: [
                 {
-                    view: "toolbar",
-                    css: "pk-pane-toolbar",
-                    height: 32,
-                    cols: [
-                        { view: "label", label: "Categories", css: "pk-pane-title" },
+                    view: "tabbar",
+                    id: "pk-left-tabbar",
+                    multiview: true,
+                    value: "tab-categories",
+                    options: [
+                        { value: "Categories", id: "tab-categories" },
+                        { value: "Storage", id: "tab-storage" },
+                        { value: "Footprints", id: "tab-footprints" },
+                        { value: "Lookups", id: "tab-lookups" },
                     ],
                 },
                 {
-                    view: "tree",
-                    id: "pk-cat-tree",
-                    select: true,
-                    drag: false,
-                    template: function (obj, common) {
-                        const indent = common.icon(obj, common);
-                        const count = obj.part_count > 0
-                            ? ` <span class="pk-cat-count">${obj.part_count}</span>`
-                            : "";
-                        return `${indent}<span class="pk-cat-name">${escapeHtml(obj.value)}</span>${count}`;
-                    },
-                    on: {
-                        onAfterSelect: function (id) {
-                            const node = this.getItem(id);
-                            // Treat "Root Category" (lvl 0) as "all parts" — no filter.
-                            const filterId = node && node.lvl === 0 ? null : (node ? node.id : null);
-                            loadParts({ category: filterId });
-                        },
-                    },
+                    view: "multiview",
+                    id: "pk-left-multiview",
+                    cells: [
+                        { id: "tab-categories", rows: [buildCategoryTreeView()] },
+                        { id: "tab-storage", rows: [buildStorageTreeView()] },
+                        { id: "tab-footprints", rows: [buildFootprintTreeView()] },
+                        { id: "tab-lookups", rows: [buildLookupsStub()] },
+                    ],
                 },
             ],
+        };
+    }
+
+    function treeNodeTemplate(obj, common) {
+        const indent = common.icon(obj, common);
+        const count = obj.part_count > 0
+            ? ` <span class="pk-cat-count">${obj.part_count}</span>`
+            : "";
+        return `${indent}<span class="pk-cat-name">${escapeHtml(obj.value)}</span>${count}`;
+    }
+
+    // --- Part categories tree ---
+
+    function buildCategoryTreeView() {
+        return {
+            view: "tree",
+            id: "pk-cat-tree",
+            select: true,
+            drag: false,
+            template: treeNodeTemplate,
+            on: {
+                onAfterSelect: function (id) {
+                    const node = this.getItem(id);
+                    const filter = (node && node.lvl === 0) || !node
+                        ? null
+                        : { kind: "category", id: node.id };
+                    loadParts({ filter });
+                },
+            },
         };
     }
 
@@ -289,7 +332,6 @@
             const tree = $$("pk-cat-tree");
             tree.clearAll();
             tree.parse(arr.map(transformCategoryNode));
-            // Auto-select root, which loads all parts.
             if (arr.length) {
                 tree.select(String(arr[0].id));
                 tree.open(String(arr[0].id));
@@ -311,16 +353,167 @@
         };
         if (node.children && node.children.length) {
             out.data = node.children.map(transformCategoryNode);
-            out.open = node.lvl === 0;  // expand root by default
+            out.open = node.lvl === 0;
         }
         return out;
+    }
+
+    // --- Storage tree (categories + locations as leaves) ---
+
+    function buildStorageTreeView() {
+        return {
+            view: "tree",
+            id: "pk-storage-tree",
+            select: true,
+            drag: false,
+            template: treeNodeTemplate,
+            on: {
+                onAfterSelect: function (id) {
+                    const node = this.getItem(id);
+                    if (!node) return;
+                    if (node.kind === "leaf") {
+                        loadParts({ filter: { kind: "storage_location", id: node.location_id } });
+                    } else if (node.lvl === 0) {
+                        loadParts({ filter: null });
+                    } else {
+                        loadParts({ filter: { kind: "storage_folder", id: node.category_id } });
+                    }
+                },
+            },
+        };
+    }
+
+    let storageTreeLoaded = false;
+    async function loadStorageTree() {
+        if (storageTreeLoaded) return;
+        try {
+            const arr = await api.storageTree();
+            const tree = $$("pk-storage-tree");
+            tree.clearAll();
+            tree.parse(arr.map(transformStorageNode));
+            if (arr.length) tree.open(transformStorageNode(arr[0]).id);
+            storageTreeLoaded = true;
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load storage tree" });
+        }
+    }
+
+    function transformStorageNode(node) {
+        const out = {
+            id: "scat:" + node.id,
+            value: node.name,
+            kind: "folder",
+            lvl: node.lvl,
+            category_id: node.id,
+            category_path: node.category_path,
+        };
+        const children = [];
+        if (node.children) children.push(...node.children.map(transformStorageNode));
+        if (node.locations) {
+            children.push(...node.locations.map((loc) => ({
+                id: "sloc:" + loc.id,
+                value: loc.name,
+                kind: "leaf",
+                location_id: loc.id,
+                part_count: loc.part_count,
+            })));
+        }
+        if (children.length) {
+            out.data = children;
+            out.open = node.lvl === 0;
+        }
+        return out;
+    }
+
+    // --- Footprint tree (categories + footprints as leaves) ---
+
+    function buildFootprintTreeView() {
+        return {
+            view: "tree",
+            id: "pk-footprint-tree",
+            select: true,
+            drag: false,
+            template: treeNodeTemplate,
+            on: {
+                onAfterSelect: function (id) {
+                    const node = this.getItem(id);
+                    if (!node) return;
+                    if (node.kind === "leaf") {
+                        loadParts({ filter: { kind: "footprint", id: node.footprint_id } });
+                    } else if (node.lvl === 0) {
+                        loadParts({ filter: null });
+                    } else {
+                        loadParts({ filter: { kind: "footprint_folder", id: node.category_id } });
+                    }
+                },
+            },
+        };
+    }
+
+    let footprintTreeLoaded = false;
+    async function loadFootprintTree() {
+        if (footprintTreeLoaded) return;
+        try {
+            const arr = await api.footprintTree();
+            const tree = $$("pk-footprint-tree");
+            tree.clearAll();
+            tree.parse(arr.map(transformFootprintNode));
+            if (arr.length) tree.open(transformFootprintNode(arr[0]).id);
+            footprintTreeLoaded = true;
+        } catch (e) {
+            console.error(e);
+            webix.message({ type: "error", text: "Failed to load footprint tree" });
+        }
+    }
+
+    function transformFootprintNode(node) {
+        const out = {
+            id: "fcat:" + node.id,
+            value: node.name,
+            kind: "folder",
+            lvl: node.lvl,
+            category_id: node.id,
+            category_path: node.category_path,
+        };
+        const children = [];
+        if (node.children) children.push(...node.children.map(transformFootprintNode));
+        if (node.footprints) {
+            children.push(...node.footprints.map((fp) => ({
+                id: "fp:" + fp.id,
+                value: fp.name,
+                kind: "leaf",
+                footprint_id: fp.id,
+                part_count: fp.part_count,
+            })));
+        }
+        if (children.length) {
+            out.data = children;
+            out.open = node.lvl === 0;
+        }
+        return out;
+    }
+
+    // --- Lookups stub (W5e will populate this) ---
+
+    function buildLookupsStub() {
+        return {
+            template:
+                '<div class="pk-detail-empty" style="padding:20px">' +
+                '<b>Lookups</b><br><br>' +
+                'Manufacturer / Distributor / PartUnit / Unit / SiPrefix editing ' +
+                'lands here in W5e.</div>',
+        };
     }
 
     // ============================================================
     //  Center pane — parts grid
     // ============================================================
 
-    let currentParts = { category: null, search: "" };
+    // Active filter for the parts grid. `filter` is null (= all parts)
+    // or { kind: "category"|"storage_folder"|"storage_location"|
+    //              "footprint_folder"|"footprint", id: number }.
+    let currentParts = { filter: null, search: "" };
 
     function buildCenterPane() {
         return {
@@ -445,10 +638,12 @@
     }
 
     async function loadParts(opts) {
-        if ("category" in opts) currentParts.category = opts.category;
+        opts = opts || {};
+        if ("filter" in opts) currentParts.filter = opts.filter;
+        if ("search" in opts) currentParts.search = opts.search;
         try {
             const json = await api.parts({
-                category: currentParts.category,
+                filter: currentParts.filter,
                 search: currentParts.search,
                 limit: 500,
                 offset: 0,
