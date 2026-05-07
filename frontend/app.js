@@ -463,6 +463,7 @@
     // ============================================================
 
     let topView = null;
+    let currentUser = null;  // set on login so per-user state can key on it
 
     function unmount() {
         if (topView) {
@@ -545,6 +546,7 @@
 
     function mountShell(user) {
         unmount();
+        currentUser = user;
         topView = webix.ui({
             id: "pk-app",
             rows: [
@@ -562,6 +564,8 @@
         });
         loadCategoryTree();
         ensureFilterDistributorsLoaded();
+        // Restore per-user parts-grid layout (W8c).
+        setTimeout(restorePartsGridState, 0);
 
         // Lazy-load the other trees the first time the user switches to
         // them. Webix tabbar with multiview:true auto-fires onChange when
@@ -2806,13 +2810,16 @@
                             label: "▾ Filters",
                             offLabel: "▸ Filters",
                             width: 90,
-                            click: function () {
-                                const pane = $$("pk-filters-pane");
-                                if (!pane) return;
-                                if (this.getValue()) pane.show();
-                                else pane.hide();
+                            on: {
+                                onChange: function (newVal) {
+                                    const pane = $$("pk-filters-pane");
+                                    if (!pane) return;
+                                    if (newVal) pane.show();
+                                    else pane.hide();
+                                },
                             },
                         },
+                        { view: "button", value: "⊞ Columns", width: 110, click: openColumnsDialog },
                         {
                             view: "search",
                             id: "pk-search",
@@ -2897,50 +2904,54 @@
                     css: "pk-grid",
                     select: "row",
                     resizeColumn: { headerOnly: true, size: 4 },
+                    dragColumn: true,
+                    // Show the per-column filter row beneath each header.
+                    headerRowHeight: 26,
                     columns: [
                         {
                             id: "name",
-                            header: "Name",
+                            header: ["Name", { content: "textFilter" }],
                             width: 220,
                             sort: "string",
                             template: (o) => escapeHtml(o.name || ""),
                         },
                         {
                             id: "internal_part_number",
-                            header: "IPN",
+                            header: ["IPN", { content: "textFilter" }],
                             width: 110,
                             sort: "string",
                             template: (o) => escapeHtml(o.internal_part_number || ""),
                         },
                         {
                             id: "description",
-                            header: "Description",
+                            header: ["Description", { content: "textFilter" }],
                             fillspace: true,
                             sort: "string",
                             template: (o) => escapeHtml(o.description || ""),
                         },
                         {
                             id: "category_path",
-                            header: "Category",
+                            header: ["Category", { content: "selectFilter" }],
                             width: 240,
                             sort: "string",
+                            // The full breadcrumb is what we filter against,
+                            // but we render the leaf for grid density.
                             template: (o) => {
                                 const p = o.category_path || "";
-                                // show only the leaf for grid density
                                 const parts = p.split(" ➤ ");
                                 return escapeHtml(parts[parts.length - 1] || p);
                             },
                         },
                         {
                             id: "stock_level",
-                            header: { text: "Stock", css: "pk-th-numeric" },
+                            header: [{ text: "Stock", css: "pk-th-numeric" }, { content: "numberFilter" }],
                             width: 70,
                             sort: "int",
                             css: "pk-numeric",
                         },
                         {
                             id: "average_price",
-                            header: { text: "Avg $", css: "pk-th-numeric" },
+                            header: [{ text: "Avg $", css: "pk-th-numeric" }, { content: "textFilter" }],
                             width: 80,
                             sort: "int",
                             css: "pk-numeric",
@@ -2954,6 +2965,10 @@
                         onAfterSelect: function (s) {
                             loadPartDetail(s.id);
                         },
+                        onAfterColumnDrop: function () { savePartsGridState(); },
+                        onColumnResize: function () { savePartsGridState(); },
+                        onAfterColumnHide: function () { savePartsGridState(); },
+                        onAfterColumnShow: function () { savePartsGridState(); },
                     },
                 },
                 {
@@ -3923,6 +3938,152 @@
             console.error(e);
             webix.message({ type: "error", text: "Failed to load part detail" });
         }
+    }
+
+    // ============================================================
+    //  Parts grid column persistence (W8c)
+    //
+    //  Webix datatable's getState/setState round-trips column order,
+    //  widths, and which ones are hidden. We save it to localStorage on
+    //  every change, keyed per user so different operators don't fight
+    //  over the layout. DB-backed persistence is W8c.X (needs new
+    //  /api/grid_presets POST/PUT/DELETE).
+    // ============================================================
+
+    function partsGridStorageKey() {
+        const u = currentUser ? currentUser.username : "anon";
+        return `pk:parts-grid-state:${u}`;
+    }
+
+    // Captured once on first mount so 'Reset layout' has a known target
+    // to revert to. Cleared on logout.
+    let _partsGridDefaultState = null;
+
+    function savePartsGridState() {
+        const grid = $$("pk-parts-grid");
+        if (!grid) return;
+        try {
+            const state = grid.getState();
+            localStorage.setItem(partsGridStorageKey(), JSON.stringify(state));
+        } catch (e) {
+            console.warn("savePartsGridState failed:", e);
+        }
+    }
+
+    function restorePartsGridState() {
+        const grid = $$("pk-parts-grid");
+        if (!grid) return;
+        // Capture pristine defaults on first call so Reset can use them.
+        if (_partsGridDefaultState == null) {
+            try { _partsGridDefaultState = grid.getState(); } catch (_) {}
+        }
+        try {
+            const raw = localStorage.getItem(partsGridStorageKey());
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            grid.setState(state);
+        } catch (e) {
+            console.warn("restorePartsGridState failed:", e);
+        }
+    }
+
+    function clearPartsGridState() {
+        try {
+            localStorage.removeItem(partsGridStorageKey());
+        } catch (_) {}
+        const grid = $$("pk-parts-grid");
+        if (grid && _partsGridDefaultState != null) {
+            try { grid.setState(_partsGridDefaultState); } catch (e) { console.warn(e); }
+        }
+    }
+
+    function openColumnsDialog() {
+        const grid = $$("pk-parts-grid");
+        if (!grid) return;
+        // Build the list of column ids → human label and current visibility.
+        const cfg = grid.config.columns;
+        const items = cfg.map((c) => {
+            // Column header may be a string OR an array of header config
+            // objects. Walk the array and find the first {text:...} or
+            // string entry — that's the label.
+            let label = c.id;
+            if (typeof c.header === "string") label = c.header;
+            else if (Array.isArray(c.header)) {
+                for (const h of c.header) {
+                    if (typeof h === "string") { label = h; break; }
+                    if (h && typeof h === "object" && h.text) { label = h.text; break; }
+                }
+            } else if (c.header && typeof c.header === "object" && c.header.text) {
+                label = c.header.text;
+            }
+            return { id: c.id, label, hidden: !!c.hidden };
+        });
+
+        webix.ui({
+            view: "window",
+            id: "pk-columns-dialog",
+            modal: true,
+            position: "center",
+            width: 380,
+            head: "Columns",
+            body: {
+                rows: [
+                    { template: "Toggle column visibility:", height: 32, css: "pk-dialog-hint", borderless: true },
+                    {
+                        view: "list",
+                        id: "pk-columns-list",
+                        data: items,
+                        select: false,
+                        type: { height: 32 },
+                        template: function (o) {
+                            const checked = o.hidden ? "" : "checked";
+                            return `<label><input type="checkbox" ${checked} data-col="${o.id}"> ${escapeHtml(o.label)}</label>`;
+                        },
+                        onClick: {
+                            // Click a row → toggle the checkbox + grid column.
+                            "webix_list_item": function (ev, row) {
+                                // Let the native checkbox toggle drive things;
+                                // intercept the click on the label/text otherwise.
+                                if (ev.target && ev.target.tagName !== "INPUT") {
+                                    const cb = ev.target.closest(".webix_list_item")
+                                        ? ev.target.closest(".webix_list_item").querySelector("input[type=checkbox]")
+                                        : null;
+                                    if (cb) cb.click();
+                                }
+                            },
+                        },
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 48,
+                        cols: [
+                            { view: "button", value: "Reset layout", width: 130, click: function () {
+                                clearPartsGridState();
+                                $$("pk-columns-dialog").close();
+                                webix.message({ text: "Layout reset", type: "success" });
+                            } },
+                            {},
+                            { view: "button", value: "Done", width: 90, css: "webix_primary", click: () => $$("pk-columns-dialog").close() },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        // Wire up the inline checkboxes after the list mounts.
+        setTimeout(() => {
+            const list = $$("pk-columns-list");
+            if (!list || !list.$view) return;
+            list.$view.querySelectorAll('input[type=checkbox][data-col]').forEach((cb) => {
+                cb.addEventListener("change", () => {
+                    const colId = cb.dataset.col;
+                    if (cb.checked) grid.showColumn(colId);
+                    else grid.hideColumn(colId);
+                    // savePartsGridState fires from onAfterColumnHide/Show.
+                });
+            });
+        }, 0);
     }
 
     // ============================================================
