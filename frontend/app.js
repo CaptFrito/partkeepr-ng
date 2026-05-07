@@ -2566,6 +2566,10 @@
 
     function openLookupAdd() {
         if (!currentLookupType) return;
+        if (currentLookupType === "manufacturers") {
+            openManufacturerEditor("new", null);
+            return;
+        }
         const cfg = LOOKUP_TYPES[currentLookupType];
         const ed = cfg.buildEdit(null);
         showLookupEditDialog({
@@ -2588,6 +2592,10 @@
             webix.message({ type: "error", text: "Select a row to edit." });
             return;
         }
+        if (currentLookupType === "manufacturers") {
+            openManufacturerEditor("edit", sel);
+            return;
+        }
         const cfg = LOOKUP_TYPES[currentLookupType];
         const ed = cfg.buildEdit(sel);
         showLookupEditDialog({
@@ -2601,6 +2609,116 @@
                 await showLookupType(currentLookupType);
             },
         });
+    }
+
+    // Comprehensive manufacturer editor (Identity + Logos tabs).
+    // Other lookup types use the generic showLookupEditDialog.
+    function openManufacturerEditor(mode, existing) {
+        const isEdit = mode === "edit";
+        const mfgId = isEdit && existing ? existing.id : null;
+        const seed = existing || {
+            name: "", url: "", email: "", phone: "", fax: "",
+            address: "", comment: "",
+        };
+
+        const tabs = [
+            {
+                header: "Identity",
+                body: {
+                    rows: [
+                        { view: "text", name: "name", label: "Name", labelWidth: 110, required: true },
+                        { view: "text", name: "url", label: "URL", labelWidth: 110 },
+                        { view: "text", name: "email", label: "Email", labelWidth: 110 },
+                        { view: "text", name: "phone", label: "Phone", labelWidth: 110 },
+                        { view: "text", name: "fax", label: "Fax", labelWidth: 110 },
+                        { view: "textarea", name: "address", label: "Address", labelWidth: 110, height: 60 },
+                        { view: "textarea", name: "comment", label: "Comment", labelWidth: 110, height: 80 },
+                        {},
+                    ],
+                },
+            },
+        ];
+        if (isEdit) {
+            tabs.push({
+                header: "Logos",
+                body: buildAttachmentsSection({
+                    tableId: "pk-mfg-logos",
+                    uploaderId: "pk-mfg-logos-uploader",
+                    kind: "ManufacturerICLogo",
+                    getParentId: () => mfgId,
+                }),
+            });
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-mfg-editor",
+            modal: true,
+            position: "center",
+            width: 820,
+            height: 620,
+            head: isEdit ? `Edit manufacturer "${existing.name}"` : "New manufacturer",
+            body: {
+                view: "form",
+                id: "pk-mfg-editor-form",
+                elements: [
+                    { view: "tabview", cells: tabs },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-mfg-editor").close() },
+                            {
+                                view: "button",
+                                value: isEdit ? "Save" : "Create",
+                                width: 110,
+                                css: isEdit ? "webix_primary" : "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-mfg-editor-form").getValues();
+                                    if (!v.name || !v.name.trim()) {
+                                        webix.message({ type: "error", text: "Name is required" });
+                                        return;
+                                    }
+                                    const body = {
+                                        name: v.name.trim(),
+                                        url: (v.url || "").trim() || null,
+                                        email: (v.email || "").trim() || null,
+                                        phone: (v.phone || "").trim() || null,
+                                        fax: (v.fax || "").trim() || null,
+                                        address: (v.address || "").trim() || null,
+                                        comment: (v.comment || "").trim() || null,
+                                    };
+                                    try {
+                                        let savedId;
+                                        if (isEdit) {
+                                            await api.lookupUpdate("/api/manufacturers", existing.id, body);
+                                            savedId = existing.id;
+                                        } else {
+                                            const created = await api.lookupCreate("/api/manufacturers", body);
+                                            savedId = created.id;
+                                        }
+                                        $$("pk-mfg-editor").close();
+                                        await showLookupType("manufacturers");
+                                        webix.message({ text: "Saved", type: "success" });
+                                        if (!isEdit) {
+                                            // Re-open in edit mode so the operator can attach a logo.
+                                            openManufacturerEditor("edit", { ...body, id: savedId });
+                                        }
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-mfg-editor-form").setValues(seed);
+
+        if (isEdit) {
+            refreshAttachments({ tableId: "pk-mfg-logos", kind: "ManufacturerICLogo", getParentId: () => mfgId });
+        }
     }
 
     function confirmLookupDelete() {
