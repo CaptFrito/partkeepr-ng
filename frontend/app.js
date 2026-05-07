@@ -4699,17 +4699,6 @@
                                     width: 120,
                                     click: () => openStockDialog("reconcile"),
                                 },
-                                {
-                                    view: "button",
-                                    value: "🖨 Label",
-                                    width: 100,
-                                    click: () => openLabelDialog({
-                                        template: "Part",
-                                        id: currentPart && currentPart.id,
-                                        name: currentPart && currentPart.name,
-                                        internal_part_number: currentPart && currentPart.internal_part_number,
-                                    }),
-                                },
                                 {},
                             ],
                         },
@@ -4724,6 +4713,17 @@
                                     css: "webix_primary",
                                     width: 100,
                                     click: () => openPartEditor("edit"),
+                                },
+                                {
+                                    view: "button",
+                                    value: "🖨 Label",
+                                    width: 100,
+                                    click: () => openLabelDialog({
+                                        template: "Part",
+                                        id: currentPart && currentPart.id,
+                                        name: currentPart && currentPart.name,
+                                        internal_part_number: currentPart && currentPart.internal_part_number,
+                                    }),
                                 },
                                 {
                                     view: "button",
@@ -6780,9 +6780,6 @@
     //  is set and the binary exists).
     // ============================================================
 
-    /// Cached on first mount of the shell. `null` while still loading.
-    let printCaps = null;
-
     /// Default DPI of PT-D series printers. The renderer outputs at
     /// this DPI so the preview is 1:1 with what ptouch-print sends
     /// to the printhead.
@@ -6848,15 +6845,29 @@
         },
     };
 
+    /// Trailing whitespace at the right edge of every label, so
+    /// content doesn't run flush to the cutter. 2 mm = ~14 px at
+    /// 180 dpi.
+    const TRAILING_MARGIN_MM = 2;
+
+    /// Text and QR sizes as fractions of the tape's printable
+    /// height. Text takes 80% of the tape height (scaled down by
+    /// line count), QR takes 90%, both centered vertically. Picked
+    /// to leave ~10–20% breathing room top/bottom so content
+    /// doesn't visually run into the tape's unprintable margins.
+    const TEXT_HEIGHT_FRACTION = 0.80;
+    const QR_HEIGHT_FRACTION   = 0.90;
+
     /// Pure renderer: take a normalized spec, return a Canvas. The
     /// same canvas drives the live preview AND the PNG-blob output.
     /// Spec shape: {width_mm, length_mm, lines: [string, ...], qr: string|null}
     function renderLabel(spec) {
         const heightPx = tapeHeightPx(spec.width_mm || 12);
-        // Add a bit of horizontal padding on each end to keep text
-        // off the cassette's leader; ptouch-print handles the actual
-        // tape feed but the visual margin is nicer.
         const widthPx = Math.max(160, Math.round((spec.length_mm || 50) * PT_DPI / 25.4));
+        // Trailing margin reserved at the right edge (after content,
+        // before the cutter). User-facing 2mm default.
+        const trailingPx = Math.round(TRAILING_MARGIN_MM * PT_DPI / 25.4);
+        const contentRight = widthPx - trailingPx;
 
         const canvas = document.createElement("canvas");
         canvas.width = widthPx;
@@ -6865,10 +6876,11 @@
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, widthPx, heightPx);
 
-        // QR / barcode area on the right, square, full tape height.
+        // QR / barcode area: a square at QR_HEIGHT_FRACTION of the
+        // tape's printable height, centered vertically.
         let qrSizePx = 0;
         if (spec.qr) {
-            qrSizePx = heightPx; // square
+            qrSizePx = Math.floor(heightPx * QR_HEIGHT_FRACTION);
             try {
                 // bwip-js writes directly into a temporary canvas;
                 // copy into ours at the right spot.
@@ -6880,32 +6892,41 @@
                     paddingwidth: 0,
                     paddingheight: 0,
                 });
-                ctx.drawImage(tmp, widthPx - qrSizePx, 0, qrSizePx, qrSizePx);
+                const qrY = Math.max(0, Math.floor((heightPx - qrSizePx) / 2));
+                ctx.drawImage(tmp, contentRight - qrSizePx, qrY, qrSizePx, qrSizePx);
             } catch (e) {
                 console.warn("QR render failed:", e);
                 qrSizePx = 0;
             }
         }
 
-        // Text lines on the left. Auto-size font to fit lines into
-        // the tape height; non-empty lines only.
+        // Text lines on the left.
+        // Font sizing — two modes:
+        //   spec.font_px > 0: explicit operator override
+        //   spec.font_px == 0 (default): all text lines together
+        //     occupy TEXT_HEIGHT_FRACTION of the tape's printable
+        //     height, divided by line count (with 1.15 leading).
+        // Either mode is still subject to horizontal-overflow
+        // shrink so long text never clips at print time.
         const textLines = (spec.lines || []).filter(Boolean);
-        const textWidthPx = widthPx - qrSizePx - 8;  // 4px gap
+        const textWidthPx = contentRight - (qrSizePx ? (qrSizePx + 8) : 0);  // 8px gap when QR present
         if (textLines.length > 0 && textWidthPx > 20) {
-            // Aim for a font size such that all lines fit vertically
-            // with ~20% leading. Cap by horizontal fit too.
             const lineHeightFactor = 1.15;
-            const targetLineHeight = heightPx / textLines.length;
-            let fontPx = Math.floor(targetLineHeight / lineHeightFactor);
-            fontPx = Math.max(8, Math.min(fontPx, heightPx - 4));
+            let fontPx;
+            if (spec.font_px && spec.font_px > 0) {
+                fontPx = Math.max(6, Math.min(spec.font_px, heightPx - 2));
+            } else {
+                const totalTextHeight = heightPx * TEXT_HEIGHT_FRACTION;
+                fontPx = Math.floor(totalTextHeight / (textLines.length * lineHeightFactor));
+                fontPx = Math.max(6, fontPx);
+            }
 
-            // Shrink font further if the longest line overflows
-            // horizontally.
+            // Always honor horizontal fit.
             ctx.font = `${fontPx}px sans-serif`;
             let widest = 0;
             for (const l of textLines) widest = Math.max(widest, ctx.measureText(l).width);
             if (widest > textWidthPx) {
-                fontPx = Math.max(8, Math.floor(fontPx * textWidthPx / widest));
+                fontPx = Math.max(6, Math.floor(fontPx * textWidthPx / widest));
                 ctx.font = `${fontPx}px sans-serif`;
             }
 
@@ -6927,7 +6948,7 @@
     /// fields recognized: {template, name, internal_part_number, id,
     /// part_id, part_name, path, category_path, form, quantity,
     /// lot_number, line1, line2, line3, qr}. All optional.
-    function openLabelDialog(seed) {
+    async function openLabelDialog(seed) {
         seed = seed || {};
         const initialTemplate = seed.template && LABEL_TEMPLATES[seed.template]
             ? seed.template
@@ -6935,6 +6956,22 @@
         const tpl = LABEL_TEMPLATES[initialTemplate];
         const seedLines = tpl.seedFields(seed);
         const seedQr = tpl.qrPayloadFor(seed);
+
+        // Fetch live printer info up front. This is the source of
+        // truth for whether the Print button shows AND for the
+        // currently-loaded tape width. Best-effort: if the call
+        // fails, fall back to "no printer" — Download PNG still
+        // works.
+        let pinfo = null;
+        try {
+            pinfo = await api.printerInfo();
+        } catch (e) {
+            console.warn("printerInfo failed:", e);
+        }
+        const printAvailable = !!(pinfo && pinfo.available);
+        const initialWidth = (pinfo && pinfo.current_tape_width_mm != null)
+            ? String(pinfo.current_tape_width_mm)
+            : "12";
 
         const widthOptions = [
             { id: "3.5", value: "3.5 mm" },
@@ -6951,6 +6988,7 @@
                 length_mm: parseFloat(f.length_mm) || 50,
                 lines: [f.line1 || "", f.line2 || "", f.line3 || ""],
                 qr: f.include_qr ? (f.qr || "") : null,
+                font_px: parseInt(f.font_px, 10) || 0,
             });
             const host = $$("pk-label-preview");
             if (!host || !host.$view) return;
@@ -6966,15 +7004,13 @@
             $$("pk-label-dialog").$labelCanvas = canvas;
         };
 
-        const printAvailable = !!(printCaps && printCaps.ptouch && printCaps.ptouch.available);
-
         webix.ui({
             view: "window",
             id: "pk-label-dialog",
             modal: true,
             position: "center",
             width: 760,
-            height: 500,
+            height: 560,
             head: "Print Label",
             body: {
                 rows: [
@@ -6983,10 +7019,15 @@
                         id: "pk-label-form",
                         elementsConfig: { labelWidth: 110 },
                         elements: [
+                            // Top row: each cell stacks label-above-field so
+                            // it's unambiguous which label belongs to which
+                            // input. labelPosition:"top" handles that for
+                            // every field in this row.
                             {
                                 cols: [
                                     {
                                         view: "richselect", name: "template", label: "Template",
+                                        labelPosition: "top",
                                         options: tplOptions,
                                         on: {
                                             onChange: function (newKey) {
@@ -7003,9 +7044,22 @@
                                             },
                                         },
                                     },
-                                    { view: "richselect", name: "width_mm", label: "Tape", options: widthOptions, width: 200,
+                                    { view: "richselect", name: "width_mm", label: "Tape width",
+                                      labelPosition: "top", options: widthOptions,
                                       on: { onChange: renderPreview } },
-                                    { view: "counter", name: "length_mm", label: "Length (mm)", min: 10, max: 200, step: 5, width: 220 },
+                                    { view: "counter", name: "length_mm", label: "Label length (mm)",
+                                      labelPosition: "top",
+                                      min: 10, max: 200, step: 5,
+                                      tooltip: "How far the printer feeds the tape, in mm. 50mm ≈ 2 inches." },
+                                    { view: "counter", name: "font_px", label: "Font (px, 0=auto)",
+                                      labelPosition: "top",
+                                      min: 0, max: 80, step: 1,
+                                      tooltip: "0 = auto-fit by tape height + text length. Set to override; horizontal overflow still shrinks to fit.",
+                                      on: { onChange: function () {
+                                          // counter doesn't tag onTimedKeyPress;
+                                          // we get explicit onChange events instead.
+                                          renderPreview();
+                                      } } },
                                 ],
                             },
                             {
@@ -7030,14 +7084,17 @@
                                               height: 24, borderless: true },
                                             { view: "template", id: "pk-label-preview", template: "",
                                               borderless: true, css: "pk-label-preview" },
-                                            { view: "template", id: "pk-label-tape-status",
-                                              template: "", height: 28, borderless: true, css: "pk-help-hint" },
                                         ],
                                     },
                                 ],
                             },
                         ],
                     },
+                    // Loaded-tape chip lives in its own row above the action
+                    // toolbar so it's always visible, never clipped by the
+                    // preview area's checkered background.
+                    { view: "template", id: "pk-label-tape-status",
+                      template: "", height: 30, borderless: true, css: "pk-help-hint" },
                     {
                         view: "toolbar",
                         css: "pk-dialog-actions",
@@ -7084,11 +7141,14 @@
             },
         }).show();
 
-        // Initial values + first render.
+        // Initial values + first render. initialWidth comes from the
+        // live `ptouch-print --info` we already awaited above; if
+        // the printer is off / not configured it's "12".
         $$("pk-label-form").setValues({
             template: initialTemplate,
-            width_mm: "12",
+            width_mm: initialWidth,
             length_mm: 50,
+            font_px: 0,
             line1: seedLines[0] || "",
             line2: seedLines[1] || "",
             line3: seedLines[2] || "",
@@ -7097,26 +7157,24 @@
         });
         setTimeout(renderPreview, 0);
 
-        // Best-effort: ask the backend what tape is loaded right now,
-        // default the picker to match. If ptouch-print isn't
-        // configured or the printer is off, just leave the default.
-        if (printAvailable) {
-            api.printerInfo()
-                .then((info) => {
-                    const status = $$("pk-label-tape-status");
-                    if (info && info.current_tape_width_mm != null) {
-                        const w = String(info.current_tape_width_mm);
-                        // Webix richselect option ids are strings.
-                        $$("pk-label-form").setValues({ width_mm: w }, true);
-                        renderPreview();
-                        if (status) status.setHTML(
-                            `<span style="padding:4px 8px;color:#1e7e34">Loaded: <b>${escapeHtml(info.status || (w + " mm"))}</b></span>`
-                        );
-                    } else if (status && info && info.status) {
-                        status.setHTML(`<span style="padding:4px 8px;color:#b09a3e">⚠ ${escapeHtml(info.status)}</span>`);
-                    }
-                })
-                .catch((e) => console.warn("printerInfo failed:", e));
+        // Loaded-tape chip below the preview. Three states:
+        //  - green: ptouch reported a tape — we synced the picker
+        //  - yellow: ptouch is configured but errored / printer is off
+        //  - hidden: ptouch isn't configured at all
+        const statusView = $$("pk-label-tape-status");
+        if (statusView) {
+            if (pinfo && pinfo.current_tape_width_mm != null) {
+                statusView.setHTML(
+                    `<span style="padding:4px 8px;color:#1e7e34">Loaded: <b>${escapeHtml(pinfo.status || (initialWidth + " mm"))}</b></span>`
+                );
+            } else if (pinfo && pinfo.status) {
+                statusView.setHTML(
+                    `<span style="padding:4px 8px;color:#b09a3e">⚠ ${escapeHtml(pinfo.status)}</span>`
+                );
+            } else if (!printAvailable) {
+                // Printing not configured — leave the chip blank.
+                statusView.setHTML("");
+            }
         }
     }
 
@@ -7127,16 +7185,8 @@
     webix.ready(async function () {
         try {
             const me = await api.me();
-            if (me) {
-                // Load print capabilities once; printCaps gates the
-                // Print button's visibility in the label dialog.
-                api.printCapabilities()
-                    .then((caps) => { printCaps = caps; })
-                    .catch((e) => console.warn("printCapabilities failed:", e));
-                mountShell(me);
-            } else {
-                mountLogin();
-            }
+            if (me) mountShell(me);
+            else mountLogin();
         } catch (e) {
             showFatalError(e);
         }
