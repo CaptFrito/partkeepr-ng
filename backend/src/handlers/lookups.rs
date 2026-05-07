@@ -725,6 +725,287 @@ pub async fn siprefix_delete(
 }
 
 // ===========================================================================
+//  Slice 5d — Merge / reassign
+//
+//  Each merge endpoint moves all FK references from a *source* row to
+//  a *target* row of the same type, then deletes the source. Atomic
+//  per type. The response carries per-table reassignment counts so the
+//  UI can confirm exactly what moved.
+//
+//  PartManufacturer / PartDistributor have no UNIQUE on (part, mfg/dist)
+//  so the same part can carry multiple rows for the same vendor — merge
+//  preserves them all (different partNumber/sku columns).
+//
+//  UnitSiPrefixes is the only M:M with a composite PK; merging units or
+//  prefixes can collide on (unit_id, siprefix_id). Pattern: DELETE
+//  conflicting source rows first, then UPDATE remaining source rows to
+//  point at target. (MySQL won't let DELETE/UPDATE reference the same
+//  table directly, so the IN-subquery is wrapped in a derived table.)
+// ===========================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct MergeRequest {
+    pub target_id: i32,
+}
+
+pub async fn mfg_merge(
+    State(pool): State<MySqlPool>,
+    Path(source_id): Path<i32>,
+    Json(req): Json<MergeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let target_id = req.target_id;
+    if source_id == target_id {
+        return Err(AppError::BadRequest("source and target are the same row"));
+    }
+    let mut tx = pool.begin().await?;
+
+    let src_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Manufacturer WHERE id = ?")
+        .bind(source_id).fetch_one(&mut *tx).await?;
+    if src_exists == 0 {
+        return Err(AppError::NotFound("manufacturer"));
+    }
+    let tgt_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Manufacturer WHERE id = ?")
+        .bind(target_id).fetch_one(&mut *tx).await?;
+    if tgt_exists == 0 {
+        return Err(AppError::BadRequest("target manufacturer not found"));
+    }
+
+    let parts_moved = sqlx::query(
+        "UPDATE PartManufacturer SET manufacturer_id = ? WHERE manufacturer_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    let logos_moved = sqlx::query(
+        "UPDATE ManufacturerICLogo SET manufacturer_id = ? WHERE manufacturer_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    sqlx::query("DELETE FROM Manufacturer WHERE id = ?")
+        .bind(source_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(Json(json!({
+        "moved": {
+            "part_links": parts_moved,
+            "ic_logos": logos_moved,
+        },
+    })))
+}
+
+pub async fn dist_merge(
+    State(pool): State<MySqlPool>,
+    Path(source_id): Path<i32>,
+    Json(req): Json<MergeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let target_id = req.target_id;
+    if source_id == target_id {
+        return Err(AppError::BadRequest("source and target are the same row"));
+    }
+    let mut tx = pool.begin().await?;
+
+    let src_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Distributor WHERE id = ?")
+        .bind(source_id).fetch_one(&mut *tx).await?;
+    if src_exists == 0 {
+        return Err(AppError::NotFound("distributor"));
+    }
+    let tgt_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Distributor WHERE id = ?")
+        .bind(target_id).fetch_one(&mut *tx).await?;
+    if tgt_exists == 0 {
+        return Err(AppError::BadRequest("target distributor not found"));
+    }
+
+    let parts_moved = sqlx::query(
+        "UPDATE PartDistributor SET distributor_id = ? WHERE distributor_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    sqlx::query("DELETE FROM Distributor WHERE id = ?")
+        .bind(source_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(Json(json!({
+        "moved": {
+            "part_links": parts_moved,
+        },
+    })))
+}
+
+pub async fn part_unit_merge(
+    State(pool): State<MySqlPool>,
+    Path(source_id): Path<i32>,
+    Json(req): Json<MergeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let target_id = req.target_id;
+    if source_id == target_id {
+        return Err(AppError::BadRequest("source and target are the same row"));
+    }
+    let mut tx = pool.begin().await?;
+
+    let src_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM PartUnit WHERE id = ?")
+        .bind(source_id).fetch_one(&mut *tx).await?;
+    if src_exists == 0 {
+        return Err(AppError::NotFound("part unit"));
+    }
+    let tgt_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM PartUnit WHERE id = ?")
+        .bind(target_id).fetch_one(&mut *tx).await?;
+    if tgt_exists == 0 {
+        return Err(AppError::BadRequest("target part unit not found"));
+    }
+
+    let parts_moved = sqlx::query(
+        "UPDATE Part SET partUnit_id = ? WHERE partUnit_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    sqlx::query("DELETE FROM PartUnit WHERE id = ?")
+        .bind(source_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(Json(json!({
+        "moved": {
+            "parts": parts_moved,
+        },
+    })))
+}
+
+pub async fn unit_merge(
+    State(pool): State<MySqlPool>,
+    Path(source_id): Path<i32>,
+    Json(req): Json<MergeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let target_id = req.target_id;
+    if source_id == target_id {
+        return Err(AppError::BadRequest("source and target are the same row"));
+    }
+    let mut tx = pool.begin().await?;
+
+    let src_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Unit WHERE id = ?")
+        .bind(source_id).fetch_one(&mut *tx).await?;
+    if src_exists == 0 {
+        return Err(AppError::NotFound("unit"));
+    }
+    let tgt_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Unit WHERE id = ?")
+        .bind(target_id).fetch_one(&mut *tx).await?;
+    if tgt_exists == 0 {
+        return Err(AppError::BadRequest("target unit not found"));
+    }
+
+    let pparams_moved = sqlx::query(
+        "UPDATE PartParameter SET unit_id = ? WHERE unit_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    let mcrit_moved = sqlx::query(
+        "UPDATE MetaPartParameterCriteria SET unit_id = ? WHERE unit_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    // UnitSiPrefixes M:M — drop source rows that would collide with
+    // existing target rows, then point the rest at target.
+    sqlx::query(
+        "DELETE FROM UnitSiPrefixes \
+         WHERE unit_id = ? \
+         AND siprefix_id IN (\
+             SELECT siprefix_id FROM \
+             (SELECT siprefix_id FROM UnitSiPrefixes WHERE unit_id = ?) t\
+         )",
+    )
+    .bind(source_id).bind(target_id).execute(&mut *tx).await?;
+
+    let prefix_links_moved = sqlx::query(
+        "UPDATE UnitSiPrefixes SET unit_id = ? WHERE unit_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+
+    sqlx::query("DELETE FROM Unit WHERE id = ?")
+        .bind(source_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(Json(json!({
+        "moved": {
+            "part_parameters": pparams_moved,
+            "meta_part_criteria": mcrit_moved,
+            "allowed_prefix_links": prefix_links_moved,
+        },
+    })))
+}
+
+pub async fn siprefix_merge(
+    State(pool): State<MySqlPool>,
+    Path(source_id): Path<i32>,
+    Json(req): Json<MergeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let target_id = req.target_id;
+    if source_id == target_id {
+        return Err(AppError::BadRequest("source and target are the same row"));
+    }
+    let mut tx = pool.begin().await?;
+
+    let src_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM SiPrefix WHERE id = ?")
+        .bind(source_id).fetch_one(&mut *tx).await?;
+    if src_exists == 0 {
+        return Err(AppError::NotFound("si prefix"));
+    }
+    let tgt_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM SiPrefix WHERE id = ?")
+        .bind(target_id).fetch_one(&mut *tx).await?;
+    if tgt_exists == 0 {
+        return Err(AppError::BadRequest("target si prefix not found"));
+    }
+
+    // Three columns on PartParameter referencing SiPrefix.id, three on
+    // MetaPartParameterCriteria, plus UnitSiPrefixes M:M. All in
+    // parallel — none of them have intra-row UNIQUE constraints that
+    // could collide.
+    let mut moved = serde_json::Map::new();
+    for (table, col, key) in &[
+        ("PartParameter",            "siPrefix_id",    "part_parameters_value"),
+        ("PartParameter",            "minSiPrefix_id", "part_parameters_min"),
+        ("PartParameter",            "maxSiPrefix_id", "part_parameters_max"),
+        ("MetaPartParameterCriteria","siPrefix_id",    "meta_criteria_value"),
+        ("MetaPartParameterCriteria","minSiPrefix_id", "meta_criteria_min"),
+        ("MetaPartParameterCriteria","maxSiPrefix_id", "meta_criteria_max"),
+    ] {
+        let q = format!("UPDATE {table} SET {col} = ? WHERE {col} = ?");
+        let n = sqlx::query(&q)
+            .bind(target_id).bind(source_id).execute(&mut *tx).await?
+            .rows_affected();
+        moved.insert(key.to_string(), serde_json::json!(n));
+    }
+
+    // UnitSiPrefixes M:M — drop source rows that would collide with
+    // existing target rows, then point the rest at target.
+    sqlx::query(
+        "DELETE FROM UnitSiPrefixes \
+         WHERE siprefix_id = ? \
+         AND unit_id IN (\
+             SELECT unit_id FROM \
+             (SELECT unit_id FROM UnitSiPrefixes WHERE siprefix_id = ?) t\
+         )",
+    )
+    .bind(source_id).bind(target_id).execute(&mut *tx).await?;
+
+    let unit_links_moved = sqlx::query(
+        "UPDATE UnitSiPrefixes SET siprefix_id = ? WHERE siprefix_id = ?",
+    )
+    .bind(target_id).bind(source_id).execute(&mut *tx).await?
+    .rows_affected();
+    moved.insert("unit_links".to_string(), serde_json::json!(unit_links_moved));
+
+    sqlx::query("DELETE FROM SiPrefix WHERE id = ?")
+        .bind(source_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(Json(json!({ "moved": moved })))
+}
+
+// ===========================================================================
 //  Helpers
 // ===========================================================================
 

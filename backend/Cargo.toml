@@ -3,6 +3,9 @@ name = "partkeepr-api"
 version = "0.1.0"
 edition = "2021"
 publish = false
+# `cargo run` (no --bin) starts the API server. The reset-password
+# binary is for one-off CLI use via `cargo run --bin reset-password`.
+default-run = "partkeepr-api"
 
 [dependencies]
 anyhow = "1"

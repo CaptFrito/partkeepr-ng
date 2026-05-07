@@ -141,6 +141,7 @@ pub fn routes() -> Router<AppState> {
             "/api/manufacturers/:id",
             axum::routing::put(lookups::mfg_update).delete(lookups::mfg_delete),
         )
+        .route("/api/manufacturers/:id/merge_into", post(lookups::mfg_merge))
         .route(
             "/api/distributors",
             get(lookups::dist_list).post(lookups::dist_create),
@@ -149,6 +150,7 @@ pub fn routes() -> Router<AppState> {
             "/api/distributors/:id",
             axum::routing::put(lookups::dist_update).delete(lookups::dist_delete),
         )
+        .route("/api/distributors/:id/merge_into", post(lookups::dist_merge))
         .route(
             "/api/part_measurement_units",
             get(lookups::part_unit_list).post(lookups::part_unit_create),
@@ -157,6 +159,7 @@ pub fn routes() -> Router<AppState> {
             "/api/part_measurement_units/:id",
             axum::routing::put(lookups::part_unit_update).delete(lookups::part_unit_delete),
         )
+        .route("/api/part_measurement_units/:id/merge_into", post(lookups::part_unit_merge))
         .route(
             "/api/units",
             get(lookups::unit_list).post(lookups::unit_create),
@@ -165,6 +168,7 @@ pub fn routes() -> Router<AppState> {
             "/api/units/:id",
             axum::routing::put(lookups::unit_update).delete(lookups::unit_delete),
         )
+        .route("/api/units/:id/merge_into", post(lookups::unit_merge))
         .route(
             "/api/si_prefixes",
             get(lookups::siprefix_list).post(lookups::siprefix_create),
@@ -173,6 +177,7 @@ pub fn routes() -> Router<AppState> {
             "/api/si_prefixes/:id",
             axum::routing::put(lookups::siprefix_update).delete(lookups::siprefix_delete),
         )
+        .route("/api/si_prefixes/:id/merge_into", post(lookups::siprefix_merge))
         // Slice 8a: Projects + BOM lines.
         .route("/api/projects", get(projects::list).post(projects::create))
         .route(

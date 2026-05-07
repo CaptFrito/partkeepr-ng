@@ -354,6 +354,15 @@
             if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
             return r.json();
         },
+        async lookupMerge(url, sourceId, targetId) {
+            const r = await fetch(`${url}/${sourceId}/merge_into`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ target_id: targetId }),
+            });
+            if (!r.ok) throw new Error(`merge failed: ${r.status} ${await r.text()}`);
+            return r.json();
+        },
         async lookupDelete(url, id) {
             const r = await fetch(`${url}/${id}`, { method: "DELETE" });
             if (!r.ok) throw new Error(`delete failed: ${r.status} ${await r.text()}`);
@@ -4010,6 +4019,7 @@
                     {},
                     { view: "button", value: "+ Add", css: "pk-btn-add", width: 80, click: openLookupAdd },
                     { view: "button", value: "✎ Edit", css: "webix_primary", width: 80, click: openLookupEdit },
+                    { view: "button", value: "🔀 Merge into…", width: 130, click: openLookupMergeDialog },
                     { view: "button", value: "🗑 Delete", css: "pk-btn-remove", width: 90, click: confirmLookupDelete },
                 ],
             },
@@ -4224,6 +4234,133 @@
         if (isEdit) {
             refreshAttachments({ tableId: "pk-mfg-logos", kind: "ManufacturerICLogo", getParentId: () => mfgId });
         }
+    }
+
+    /// Build a friendly display label for a lookup row regardless of
+    /// type (manufacturers/distributors/units use `name`, si_prefixes
+    /// uses `prefix`, fall back to `#id`).
+    function lookupRowLabel(row) {
+        if (!row) return "?";
+        if (row.name) return row.name;
+        if (row.prefix) return row.prefix + (row.symbol ? ` (${row.symbol})` : "");
+        return `#${row.id}`;
+    }
+
+    /// Slice 5d — open the merge-into dialog. Source is the currently-
+    /// selected row; target is picked from the same lookup type's other
+    /// rows. On confirm: backend reassigns all FK references in one
+    /// transaction and deletes the source.
+    async function openLookupMergeDialog() {
+        if (!currentLookupType) return;
+        const sel = getSelectedLookupRow();
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a row to merge." });
+            return;
+        }
+        const cfg = LOOKUP_TYPES[currentLookupType];
+
+        // Re-fetch the full list so we always pick from current data
+        // (the grid may show a stale snapshot if the user just
+        // edited something in another tab).
+        let rows;
+        try {
+            rows = await api.lookupList(cfg.url);
+        } catch (e) {
+            webix.message({ type: "error", text: "Failed to load list: " + (e.message || e) });
+            return;
+        }
+        const targets = rows
+            .filter((r) => r.id !== sel.id)
+            .map((r) => ({ id: r.id, value: lookupRowLabel(r) }))
+            .sort((a, b) => a.value.localeCompare(b.value));
+        if (targets.length === 0) {
+            webix.message({ type: "error", text: "No other rows to merge into." });
+            return;
+        }
+
+        const sourceLabel = lookupRowLabel(sel);
+
+        webix.ui({
+            view: "window",
+            id: "pk-lookup-merge",
+            modal: true,
+            position: "center",
+            width: 520,
+            head: `Merge "${sourceLabel}" into…`,
+            body: {
+                rows: [
+                    {
+                        view: "template",
+                        height: 80,
+                        borderless: true,
+                        css: "pk-dialog-hint",
+                        template: `<div style="padding:10px 14px;line-height:1.5">` +
+                            `All references to <b>${escapeHtml(sourceLabel)}</b> ` +
+                            `will be reassigned to the target you choose, then ` +
+                            `<b>${escapeHtml(sourceLabel)}</b> will be deleted.<br>` +
+                            `<span style="color:#b03030">This cannot be undone.</span>` +
+                            `</div>`,
+                    },
+                    {
+                        view: "form",
+                        id: "pk-lookup-merge-form",
+                        elements: [
+                            {
+                                view: "richselect",
+                                name: "target_id",
+                                label: "Target",
+                                labelWidth: 80,
+                                options: targets,
+                            },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100,
+                              click: () => $$("pk-lookup-merge").close() },
+                            {
+                                view: "button",
+                                value: "Merge",
+                                width: 110,
+                                css: "pk-btn-remove",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-lookup-merge-form").getValues();
+                                    const targetId = parseInt(v.target_id, 10);
+                                    if (!targetId) {
+                                        webix.message({ type: "error", text: "Pick a target." });
+                                        return;
+                                    }
+                                    try {
+                                        const resp = await api.lookupMerge(cfg.url, sel.id, targetId);
+                                        $$("pk-lookup-merge").close();
+                                        // lookupsCache is now stale (units, prefixes
+                                        // counts may have shifted; ids are gone).
+                                        lookupsCache = null;
+                                        await showLookupType(currentLookupType);
+                                        const moved = (resp && resp.moved) || {};
+                                        const summary = Object.entries(moved)
+                                            .filter(([, n]) => n > 0)
+                                            .map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`)
+                                            .join(", ");
+                                        const msg = summary
+                                            ? `Merged: moved ${summary}.`
+                                            : `Merged (no references to move).`;
+                                        webix.message({ type: "success", text: msg });
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Merge failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
     }
 
     function confirmLookupDelete() {
