@@ -1043,19 +1043,7 @@
             webix.message({ type: "error", text: "Select a storage folder first." });
             return;
         }
-        showSimpleNameDescDialog({
-            title: "New storage location",
-            saveLabel: "Create",
-            omitDescription: true,
-            initial: { name: "" },
-            onSave: async (v) => {
-                const created = await api.createStorageLocation({
-                    category_id: parentId,
-                    name: v.name,
-                });
-                await reloadStorageTreeAndGrid("sloc:" + created.id);
-            },
-        });
+        openStorageLocationEditor("new", null, parentId);
     }
 
     async function openStorageEdit() {
@@ -1084,17 +1072,156 @@
                 },
             });
         } else {
-            // leaf — location edit, name only
-            showSimpleNameDescDialog({
-                title: `Edit storage location "${node.value}"`,
-                saveLabel: "Save",
-                omitDescription: true,
-                initial: { name: node.value },
-                onSave: async (v) => {
-                    await api.updateStorageLocation(node.location_id, { name: v.name });
-                    await reloadStorageTreeAndGrid("sloc:" + node.location_id);
+            // leaf — comprehensive editor with Image + Contained Parts tabs
+            openStorageLocationEditor(
+                "edit",
+                { id: node.location_id, name: node.value },
+                null
+            );
+        }
+    }
+
+    function openStorageLocationEditor(mode, existing, parentCategoryId) {
+        const isEdit = mode === "edit";
+        const locId = isEdit && existing ? existing.id : null;
+        const seed = existing || { name: "" };
+
+        const tabs = [
+            {
+                header: "Identity",
+                body: {
+                    rows: [
+                        { view: "text", name: "name", label: "Name", labelWidth: 130, required: true },
+                        {},
+                    ],
+                },
+            },
+        ];
+        if (isEdit) {
+            tabs.push({
+                header: "Image",
+                body: buildAttachmentsSection({
+                    tableId: "pk-sloc-images",
+                    uploaderId: "pk-sloc-images-uploader",
+                    kind: "StorageLocationImage",
+                    getParentId: () => locId,
+                }),
+            });
+            tabs.push({
+                header: "Contained Parts",
+                body: {
+                    rows: [
+                        {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 32,
+                            cols: [
+                                { view: "label", id: "pk-sloc-contained-status", label: "", css: "pk-pane-title" },
+                            ],
+                        },
+                        {
+                            view: "datatable",
+                            id: "pk-sloc-contained",
+                            css: "pk-grid",
+                            select: "row",
+                            columns: [
+                                { id: "name", header: "Name", fillspace: true, sort: "string" },
+                                { id: "internal_part_number", header: "IPN", width: 110, sort: "string" },
+                                {
+                                    id: "stock_level",
+                                    header: { text: "Stock", css: "pk-th-numeric" },
+                                    width: 70, sort: "int", css: "pk-numeric",
+                                },
+                                {
+                                    id: "category_path",
+                                    header: "Category",
+                                    width: 220,
+                                    sort: "string",
+                                    template: (o) => {
+                                        const parts = (o.category_path || "").split(" ➤ ");
+                                        return escapeHtml(parts[parts.length - 1] || "");
+                                    },
+                                },
+                            ],
+                        },
+                    ],
                 },
             });
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-sloc-editor",
+            modal: true,
+            position: "center",
+            width: 820,
+            height: 600,
+            head: isEdit ? `Edit storage location "${existing.name}"` : "New storage location",
+            body: {
+                view: "form",
+                id: "pk-sloc-editor-form",
+                elements: [
+                    { view: "tabview", cells: tabs },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-sloc-editor").close() },
+                            {
+                                view: "button",
+                                value: isEdit ? "Save" : "Create",
+                                width: 110,
+                                css: isEdit ? "webix_primary" : "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-sloc-editor-form").getValues();
+                                    if (!v.name || !v.name.trim()) {
+                                        webix.message({ type: "error", text: "Name is required" });
+                                        return;
+                                    }
+                                    try {
+                                        let savedId;
+                                        if (isEdit) {
+                                            await api.updateStorageLocation(existing.id, { name: v.name.trim() });
+                                            savedId = existing.id;
+                                        } else {
+                                            const created = await api.createStorageLocation({
+                                                category_id: parentCategoryId,
+                                                name: v.name.trim(),
+                                            });
+                                            savedId = created.id;
+                                        }
+                                        $$("pk-sloc-editor").close();
+                                        await reloadStorageTreeAndGrid("sloc:" + savedId);
+                                        webix.message({ text: "Saved", type: "success" });
+                                        if (!isEdit) {
+                                            // Re-open in edit mode so the operator can attach an image.
+                                            openStorageLocationEditor("edit", { id: savedId, name: v.name.trim() }, null);
+                                        }
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-sloc-editor-form").setValues(seed);
+
+        if (isEdit) {
+            refreshAttachments({ tableId: "pk-sloc-images", kind: "StorageLocationImage", getParentId: () => locId });
+            // Load contained parts (read-only).
+            api.parts({ filter: { kind: "storage_location", id: locId }, limit: 1000, offset: 0 })
+                .then((json) => {
+                    const grid = $$("pk-sloc-contained");
+                    if (!grid) return;
+                    grid.clearAll();
+                    grid.parse(json.items);
+                    const status = $$("pk-sloc-contained-status");
+                    if (status) status.setValue(`${json.items.length} part${json.items.length === 1 ? "" : "s"} in this location`);
+                })
+                .catch((e) => console.error(e));
         }
     }
 
@@ -1404,19 +1531,7 @@
             webix.message({ type: "error", text: "Select a footprint folder first." });
             return;
         }
-        showSimpleNameDescDialog({
-            title: "New footprint",
-            saveLabel: "Create",
-            initial: { name: "", description: "" },
-            onSave: async (v) => {
-                const created = await api.createFootprint({
-                    category_id: parentId,
-                    name: v.name,
-                    description: v.description || null,
-                });
-                await reloadFootprintTreeAndGrid("fp:" + created.id);
-            },
-        });
+        openFootprintLeafEditor("new", null, parentId);
     }
 
     async function openFootprintEdit() {
@@ -1445,20 +1560,123 @@
                 },
             });
         } else {
-            // leaf — footprint with name + description
+            // leaf — comprehensive editor with Images + Attachments tabs
             const full = await api.footprintById(node.footprint_id);
-            showSimpleNameDescDialog({
-                title: `Edit footprint "${node.value}"`,
-                saveLabel: "Save",
-                initial: { name: node.value, description: (full && full.description) || "" },
-                onSave: async (v) => {
-                    await api.updateFootprint(node.footprint_id, {
-                        name: v.name,
-                        description: v.description || null,
-                    });
-                    await reloadFootprintTreeAndGrid("fp:" + node.footprint_id);
+            openFootprintLeafEditor(
+                "edit",
+                full || { id: node.footprint_id, name: node.value, description: "" },
+                null
+            );
+        }
+    }
+
+    function openFootprintLeafEditor(mode, existing, parentCategoryId) {
+        const isEdit = mode === "edit";
+        const fpId = isEdit && existing ? existing.id : null;
+        const seed = existing || { name: "", description: "" };
+
+        const tabs = [
+            {
+                header: "Identity",
+                body: {
+                    rows: [
+                        { view: "text", name: "name", label: "Name", labelWidth: 130, required: true },
+                        { view: "textarea", name: "description", label: "Description", labelWidth: 130, height: 100 },
+                        {},
+                    ],
                 },
+            },
+        ];
+        if (isEdit) {
+            tabs.push({
+                header: "Images",
+                body: buildAttachmentsSection({
+                    tableId: "pk-fp-images",
+                    uploaderId: "pk-fp-images-uploader",
+                    kind: "FootprintImage",
+                    getParentId: () => fpId,
+                }),
             });
+            tabs.push({
+                header: "Attachments",
+                body: buildAttachmentsSection({
+                    tableId: "pk-fp-attachments",
+                    uploaderId: "pk-fp-attachments-uploader",
+                    kind: "FootprintAttachment",
+                    getParentId: () => fpId,
+                }),
+            });
+        }
+
+        webix.ui({
+            view: "window",
+            id: "pk-fp-editor",
+            modal: true,
+            position: "center",
+            width: 820,
+            height: 600,
+            head: isEdit ? `Edit footprint "${existing.name}"` : "New footprint",
+            body: {
+                view: "form",
+                id: "pk-fp-editor-form",
+                elements: [
+                    { view: "tabview", cells: tabs },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 90, click: () => $$("pk-fp-editor").close() },
+                            {
+                                view: "button",
+                                value: isEdit ? "Save" : "Create",
+                                width: 110,
+                                css: isEdit ? "webix_primary" : "pk-btn-add",
+                                hotkey: "ctrl+s",
+                                click: async function () {
+                                    const v = $$("pk-fp-editor-form").getValues();
+                                    if (!v.name || !v.name.trim()) {
+                                        webix.message({ type: "error", text: "Name is required" });
+                                        return;
+                                    }
+                                    const body = {
+                                        name: v.name.trim(),
+                                        description: (v.description || "").trim() || null,
+                                    };
+                                    try {
+                                        let savedId;
+                                        if (isEdit) {
+                                            await api.updateFootprint(existing.id, body);
+                                            savedId = existing.id;
+                                        } else {
+                                            const created = await api.createFootprint({
+                                                ...body,
+                                                category_id: parentCategoryId,
+                                            });
+                                            savedId = created.id;
+                                        }
+                                        $$("pk-fp-editor").close();
+                                        await reloadFootprintTreeAndGrid("fp:" + savedId);
+                                        webix.message({ text: "Saved", type: "success" });
+                                        if (!isEdit) {
+                                            // Re-open in edit mode so the operator can immediately
+                                            // attach images/files to the freshly created footprint.
+                                            const full = await api.footprintById(savedId);
+                                            openFootprintLeafEditor("edit", full, null);
+                                        }
+                                    } catch (e) {
+                                        webix.message({ type: "error", text: "Save failed: " + (e.message || e) });
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-fp-editor-form").setValues(seed);
+
+        if (isEdit) {
+            refreshAttachments({ tableId: "pk-fp-images", kind: "FootprintImage", getParentId: () => fpId });
+            refreshAttachments({ tableId: "pk-fp-attachments", kind: "FootprintAttachment", getParentId: () => fpId });
         }
     }
 
