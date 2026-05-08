@@ -6662,6 +6662,47 @@
                                     ],
                                 },
                             },
+                            {
+                                header: "Receipts",
+                                body: {
+                                    rows: [
+                                        {
+                                            view: "toolbar",
+                                            css: "pk-pane-toolbar",
+                                            height: 32,
+                                            cols: [
+                                                { view: "label", id: "pk-edit-receipts-status",
+                                                  label: "Stock receipts attributed to a distributor sales order.", css: "pk-help-hint" },
+                                                {},
+                                            ],
+                                        },
+                                        {
+                                            view: "datatable",
+                                            id: "pk-edit-receipts",
+                                            editable: false,
+                                            select: false,
+                                            data: [],
+                                            columns: [
+                                                { id: "distributor_name", header: "Distributor", width: 130 },
+                                                { id: "sales_order_number", header: "SO #", width: 140 },
+                                                { id: "units_added", header: { text: "Units", css: "pk-th-numeric" },
+                                                  width: 90, css: "pk-numeric",
+                                                  template: (o) => "+" + o.units_added },
+                                                { id: "_unit_price", header: { text: "Unit price", css: "pk-th-numeric" },
+                                                  width: 130, css: "pk-numeric",
+                                                  template: function (o) {
+                                                      if (!o.avg_unit_price) return "";
+                                                      return escapeHtml(o.avg_unit_price + " " + (o.currency || ""));
+                                                  } },
+                                                { id: "_last_date", header: "Last received", width: 130,
+                                                  template: (o) => (o.last_date || "").substring(0, 10) },
+                                                { id: "entry_count", header: { text: "Entries", css: "pk-th-numeric" },
+                                                  width: 90, css: "pk-numeric" },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
                         ],
                     },
                     {
@@ -6694,6 +6735,29 @@
                 kind: "PartAttachment",
                 getParentId: () => currentPart.id,
             });
+            // Receipts tab is read-only; populate from the same endpoint
+            // the part-detail panel uses.
+            (async () => {
+                try {
+                    const receipts = await api.partReceipts(currentPart.id);
+                    const grid = $$("pk-edit-receipts");
+                    if (grid) {
+                        grid.clearAll();
+                        grid.parse((receipts || []).map((r, i) => Object.assign({ id: i + 1 }, r)));
+                    }
+                    const status = $$("pk-edit-receipts-status");
+                    if (status) {
+                        const n = (receipts || []).length;
+                        const txt = n
+                            ? `${n} order${n === 1 ? "" : "s"} contributed to this part's stock.`
+                            : "No distributor-attributed receipts yet. Use the 📦 Receive DK Order button on the parts grid to import an order.";
+                        status.define("label", txt);
+                        status.refresh();
+                    }
+                } catch (e) {
+                    console.warn("part receipts load failed:", e);
+                }
+            })();
         }
     }
 
