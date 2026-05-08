@@ -783,3 +783,215 @@ pub async fn order_receive(
         results,
     }))
 }
+
+// ===========================================================================
+//  Slice 13b — Digi-Key Barcode API
+//
+//  Four endpoints (all GET, base = /Barcoding/v3/...):
+//    ProductBarcodes/{barcode}      — 1D code on a per-part label
+//    Product2DBarcodes/{barcode}    — 2D code on a per-reel/CutTape label
+//    PackListBarcodes/{barcode}     — 1D code on a packing slip
+//    PackList2DBarcodes/{barcode}   — 2D code on a packing slip
+//
+//  We auto-detect kind by content:
+//    - Contains 0x1D (GS) or 0x1E (RS) or starts with "[)>" → 2D
+//    - Else → 1D
+//    - 2D + payload contains "K" data identifier (after GS) → has SO# → PackList2D
+//    - 2D otherwise → Product2D (per-reel label, has lot + date but no SO)
+//
+//  Control characters in the payload get URL-encoded automatically by
+//  reqwest::Url::path_segments_mut().push(). Inateck Nano 160D and
+//  similar HID scanners typically pass GS through if "function key
+//  emulation" is enabled — otherwise the operator may need to scan
+//  the scanner's config sheet to enable it.
+//
+//  Response shape varies by endpoint, but we union it: every field
+//  is Optional, populated when the endpoint provides it.
+// ===========================================================================
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DkBarcodeResponse {
+    #[serde(default, alias = "DigiKeyPartNumber")]
+    digi_key_part_number: Option<String>,
+    #[serde(default, alias = "ManufacturerPartNumber")]
+    manufacturer_part_number: Option<String>,
+    #[serde(default, alias = "ManufacturerName")]
+    manufacturer_name: Option<String>,
+    #[serde(default, alias = "Description")]
+    description: Option<String>,
+    #[serde(default, alias = "Quantity",
+            deserialize_with = "de_int_or_string")]
+    quantity: Option<i32>,
+    /// PackList endpoints only.
+    #[serde(default, alias = "SalesorderId", alias = "SalesOrderId",
+            deserialize_with = "de_int_or_string")]
+    sales_order_id: Option<i32>,
+    #[serde(default, alias = "InvoiceId",
+            deserialize_with = "de_int_or_string")]
+    invoice_id: Option<i32>,
+    #[serde(default, alias = "PurchaseOrder")]
+    purchase_order: Option<String>,
+    #[serde(default, alias = "CustomerReference")]
+    customer_reference: Option<String>,
+    #[serde(default, alias = "CountryOfOrigin")]
+    country_of_origin: Option<String>,
+    /// Product2D endpoint only — the per-reel label carries
+    /// manufacturing batch info that's interesting for traceability.
+    #[serde(default, alias = "LotCode")]
+    lot_code: Option<String>,
+    #[serde(default, alias = "DateCode")]
+    date_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BarcodeRequest {
+    pub payload: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BarcodeResponse {
+    /// Which endpoint we hit. "product_1d" | "product_2d" | "packlist_2d" | "packlist_1d"
+    pub kind: String,
+    pub digikey_pn: Option<String>,
+    pub mpn: Option<String>,
+    pub manufacturer: Option<String>,
+    pub description: Option<String>,
+    pub quantity: Option<i32>,
+    pub sales_order_number: Option<String>,
+    pub invoice_id: Option<i32>,
+    pub purchase_order: Option<String>,
+    pub customer_reference: Option<String>,
+    pub country_of_origin: Option<String>,
+    pub lot_code: Option<String>,
+    pub date_code: Option<String>,
+    /// Local-DB match result, joined on (Digi-Key, digikey_pn).
+    pub part_id: Option<i32>,
+    pub part_name: Option<String>,
+    pub current_stock: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]  // PackList1D supported by the API even if detect_kind doesn't currently emit it
+enum BarcodeKind { Product1D, Product2D, PackList1D, PackList2D }
+
+impl BarcodeKind {
+    fn endpoint(self) -> &'static str {
+        match self {
+            BarcodeKind::Product1D  => "ProductBarcodes",
+            BarcodeKind::Product2D  => "Product2DBarcodes",
+            BarcodeKind::PackList1D => "PackListBarcodes",
+            BarcodeKind::PackList2D => "PackList2DBarcodes",
+        }
+    }
+    fn tag(self) -> &'static str {
+        match self {
+            BarcodeKind::Product1D  => "product_1d",
+            BarcodeKind::Product2D  => "product_2d",
+            BarcodeKind::PackList1D => "packlist_1d",
+            BarcodeKind::PackList2D => "packlist_2d",
+        }
+    }
+}
+
+fn detect_kind(payload: &str) -> BarcodeKind {
+    let has_2d_markers = payload.starts_with("[)>")
+        || payload.contains('\u{001D}')   // GS
+        || payload.contains('\u{001E}');  // RS
+    if !has_2d_markers {
+        return BarcodeKind::Product1D;
+    }
+    // Heuristic: PackList2D codes carry K (customer reference) + 11K
+    // (invoice) + 13K (sales order) data identifiers. Per-reel
+    // Product2D codes carry P (part) + Q (qty) + 1T (lot) + 4L
+    // (country) but no K-prefixed fields.
+    let has_packlist_field = payload.contains("\u{001D}K")
+        || payload.contains("\u{001D}11K")
+        || payload.contains("\u{001D}13K")
+        || payload.contains("\u{001D}1K");
+    if has_packlist_field {
+        BarcodeKind::PackList2D
+    } else {
+        BarcodeKind::Product2D
+    }
+}
+
+async fn fetch_barcode(
+    cfg: &DigiKeyConfig,
+    payload: &str,
+    kind: BarcodeKind,
+) -> Result<DkBarcodeResponse, AppError> {
+    let base = format!("{}/Barcoding/v3/{}/", cfg.base_url, kind.endpoint());
+    let mut url = reqwest::Url::parse(&base)
+        .map_err(|e| AppError::Internal(format!("dk barcode url: {e}")))?;
+    url.path_segments_mut()
+        .map_err(|_| AppError::Internal("dk barcode url cannot-be-base".into()))?
+        .push(payload);
+    let body = digikey_request(
+        cfg, reqwest::Method::GET, url.as_str(), None, "barcode",
+        cfg.customer_id.as_deref(),
+    ).await?;
+    serde_json::from_str(&body).map_err(|e| AppError::Internal(format!(
+        "digikey barcode parse: {e}: {}",
+        body.chars().take(400).collect::<String>()
+    )))
+}
+
+pub async fn process_barcode(
+    State(pool): State<MySqlPool>,
+    State(cfg): State<DigiKeyConfig>,
+    Json(req): Json<BarcodeRequest>,
+) -> Result<Json<BarcodeResponse>, AppError> {
+    if !cfg.available() {
+        return Err(AppError::BadRequest(
+            "digikey not configured (set PARTKEEPR_DIGIKEY_CLIENT_ID and _CLIENT_SECRET)",
+        ));
+    }
+    let payload = req.payload.trim();
+    if payload.is_empty() {
+        return Err(AppError::BadRequest("payload is required"));
+    }
+
+    let kind = detect_kind(payload);
+    let parsed = fetch_barcode(&cfg, payload, kind).await?;
+
+    // Local match: PartDistributor where (Digi-Key, orderNumber=DK SKU).
+    let dk_pn = parsed.digi_key_part_number.clone().unwrap_or_default();
+    let (part_id, part_name, current_stock) = if dk_pn.trim().is_empty() {
+        (None, None, None)
+    } else {
+        let row: Option<(i32, String, i32)> = sqlx::query_as(
+            "SELECT p.id, p.name, p.stockLevel \
+             FROM PartDistributor pd \
+             JOIN Distributor d ON d.id = pd.distributor_id \
+             JOIN Part p        ON p.id = pd.part_id \
+             WHERE LOWER(d.name) = 'digi-key' \
+               AND pd.orderNumber = ? \
+             ORDER BY p.id LIMIT 1",
+        )
+        .bind(dk_pn.trim())
+        .fetch_optional(&pool)
+        .await?;
+        match row {
+            Some((pid, name, stock)) => (Some(pid), Some(name), Some(stock)),
+            None => (None, None, None),
+        }
+    };
+
+    Ok(Json(BarcodeResponse {
+        kind: kind.tag().to_string(),
+        digikey_pn: parsed.digi_key_part_number,
+        mpn: parsed.manufacturer_part_number,
+        manufacturer: parsed.manufacturer_name,
+        description: parsed.description,
+        quantity: parsed.quantity,
+        sales_order_number: parsed.sales_order_id.map(|n| n.to_string()),
+        invoice_id: parsed.invoice_id,
+        purchase_order: parsed.purchase_order,
+        customer_reference: parsed.customer_reference,
+        country_of_origin: parsed.country_of_origin,
+        lot_code: parsed.lot_code,
+        date_code: parsed.date_code,
+        part_id, part_name, current_stock,
+    }))
+}

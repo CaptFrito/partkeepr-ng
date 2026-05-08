@@ -563,6 +563,16 @@
             if (!r.ok) throw new Error((data && data.error) || `${source} import failed: ${r.status}`);
             return data;
         },
+        async digikeyBarcode(payload) {
+            const r = await fetch("/api/lookup/digikey/barcode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ payload }),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `digikey barcode failed: ${r.status}`);
+            return data;
+        },
         async lookupOrderStatus(source, orderId) {
             const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/order-status`, {
                 method: "POST",
@@ -799,6 +809,28 @@
         const value = (raw || "").trim();
         if (!value) return;
 
+        // Pattern 2: distributor 2D barcode. Detect by control-char
+        // markers (GS = 0x1D, RS = 0x1E) or the ANSI MH10.8 header
+        // "[)>". Send to the backend Digi-Key Barcode API and dispatch
+        // on the result. Mouser 2D codes use the same family of
+        // identifiers; for now we route them through the same DK
+        // endpoint — DK's parser tolerates a Mouser-format payload
+        // poorly, so this'll likely return "no match" on a Mouser
+        // packing slip and we'll add a Mouser-specific endpoint
+        // later if needed.
+        const looks2D = value.startsWith("[)>")
+            || /[]/.test(value);
+        if (looks2D) {
+            try {
+                const decoded = await api.digikeyBarcode(value);
+                await dispatchBarcodeResult(decoded);
+            } catch (e) {
+                console.error("barcode decode failed", e);
+                webix.message({ type: "error", text: "Barcode decode failed: " + (e.message || e) });
+            }
+            return;
+        }
+
         // Pattern 1: our own QR-code URL ("/#/part/<id>"). Match either
         // a full URL or just the hash fragment, since some scanners
         // strip the host portion (URL Mode quirk on Inateck etc.).
@@ -870,6 +902,112 @@
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Scan failed: " + (e.message || e) });
+        }
+    }
+
+    /// After /api/lookup/digikey/barcode decodes a 2D scan, dispatch
+    /// based on whether we found a local match:
+    ///  - matched + has quantity (PackList2D from a packing slip):
+    ///      jump to part, prompt to add the qty to stock with SO#
+    ///      attribution.
+    ///  - matched + no quantity (Product2D from a per-reel label):
+    ///      jump to part. Lot/date/country code shown as toast for
+    ///      reference (no auto-stock — operator decides what to do).
+    ///  - no match: open lookup-import dialog pre-filled with the
+    ///      scanned MPN + force the imported PartDistributor's
+    ///      orderNumber to the scanned DK SKU.
+    async function dispatchBarcodeResult(decoded) {
+        const skuLabel = decoded.digikey_pn ? ` ${decoded.digikey_pn}` : "";
+        if (decoded.part_id) {
+            // Navigate to part.
+            try {
+                if ($$("pk-left-tabbar")) $$("pk-left-tabbar").setValue("tab-categories");
+                const cell = $$("centerpane-grid");
+                if (cell) cell.show();
+                await loadParts({ search: "" });
+                const grid = $$("pk-parts-grid");
+                if (grid && grid.exists(decoded.part_id)) {
+                    grid.select(decoded.part_id);
+                    grid.showItem(decoded.part_id);
+                }
+                await loadPartDetail(decoded.part_id);
+            } catch (e) {
+                console.warn("post-decode navigation:", e);
+            }
+            // Offer stock-in if the barcode carries a quantity (i.e.
+            // it was a PackList2D scan from a packing slip).
+            if (decoded.quantity && decoded.quantity > 0) {
+                const so = decoded.sales_order_number ? ` from SO #${decoded.sales_order_number}` : "";
+                webix.confirm({
+                    title: "Receive scanned line",
+                    text: `Add <b>+${decoded.quantity}</b> to <b>${escapeHtml(decoded.part_name || "")}</b>${so}?`,
+                    ok: "Add stock", cancel: "Skip",
+                }).then(async (yes) => {
+                    if (!yes) return;
+                    try {
+                        const body = {
+                            stock_level: decoded.quantity,
+                            comment: decoded.sales_order_number
+                                ? `Digi-Key SO #${decoded.sales_order_number} (scanned)`
+                                : "Digi-Key barcode scan",
+                            correction: false,
+                        };
+                        if (decoded.sales_order_number) {
+                            // Resolve Digi-Key distributor_id from cache.
+                            const dk = (lookupsCache && lookupsCache.distributors || [])
+                                .find((d) => (d.name || "").toLowerCase() === "digi-key");
+                            if (dk) {
+                                body.distributor_id = dk.id;
+                                body.sales_order_number = decoded.sales_order_number;
+                            }
+                        }
+                        await api.addStockEntry(decoded.part_id, body);
+                        await loadPartDetail(decoded.part_id);
+                        webix.message({ type: "success", text: `+${decoded.quantity} stocked` });
+                    } catch (e) {
+                        webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
+                    }
+                });
+            } else {
+                // Per-reel label — just surface the traceability fields.
+                const bits = [];
+                if (decoded.lot_code)  bits.push(`lot ${decoded.lot_code}`);
+                if (decoded.date_code) bits.push(`date ${decoded.date_code}`);
+                if (decoded.country_of_origin) bits.push(decoded.country_of_origin);
+                webix.message({
+                    type: "success",
+                    text: `Found ${escapeHtml(decoded.part_name || "")}` +
+                        (bits.length ? ` · ${bits.join(" · ")}` : ""),
+                });
+            }
+        } else {
+            // No local match — offer to import via the lookup dialog.
+            const mpn = (decoded.mpn || "").trim();
+            if (!mpn && !decoded.digikey_pn) {
+                webix.message({ type: "error", text: "Barcode decoded but no MPN/SKU returned." });
+                return;
+            }
+            webix.message({
+                type: "info",
+                text: `Scanned${skuLabel} — opening import dialog…`,
+            });
+            openLookupSearchDialog({
+                prefillSource: "digikey",
+                prefillMpn: mpn || decoded.digikey_pn,
+                forceDistributorPn: decoded.digikey_pn || "",
+                onImported: async () => {
+                    // After import, refresh parts grid; if the barcode
+                    // also had a quantity, prompt to stock it now.
+                    try { await loadParts({ search: "" }); } catch (_) {}
+                    if (decoded.quantity && decoded.quantity > 0 && decoded.digikey_pn) {
+                        // Quietly re-decode to pick up the freshly-matched part_id.
+                        try {
+                            const re = await api.digikeyBarcode(decoded.raw || decoded.digikey_pn);
+                            if (re.part_id) await dispatchBarcodeResult(re);
+                        } catch (_) {}
+                    }
+                },
+            });
         }
     }
 

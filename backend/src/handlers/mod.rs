@@ -262,4 +262,8 @@ pub fn routes() -> Router<AppState> {
         // shapes; one frontend dialog drives both).
         .route("/api/lookup/mouser/order-status", post(mouser::order_status))
         .route("/api/lookup/mouser/order-receive", post(mouser::order_receive))
+        // Slice 13b — Digi-Key Barcode API (decode 1D/2D codes from
+        // packing slips and per-reel labels). Frontend handleScan
+        // dispatches here when it detects a 2D-shaped payload.
+        .route("/api/lookup/digikey/barcode", post(digikey::process_barcode))
 }
