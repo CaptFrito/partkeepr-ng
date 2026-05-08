@@ -9,6 +9,7 @@ pub mod attachments;
 pub mod auth;
 pub mod categories;
 pub mod clamd;
+pub mod digikey;
 pub mod footprints;
 pub mod grid_presets;
 pub mod lookup;
@@ -247,8 +248,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/print/capabilities", get(printing::capabilities))
         .route("/api/print/printer_info", get(printing::printer_info))
         .route("/api/print/label", post(printing::print_label))
-        // Slice 12a.1: Mouser Search + Import (per-source lookup APIs).
+        // Slice 12a.1 + 12b: Mouser + Digi-Key Search/Import.
         .route("/api/lookup/capabilities", get(lookup::capabilities))
         .route("/api/lookup/mouser/search", post(mouser::search))
         .route("/api/lookup/mouser/import", post(mouser::import))
+        .route("/api/lookup/digikey/search", post(digikey::search))
+        .route("/api/lookup/digikey/import", post(digikey::import))
 }

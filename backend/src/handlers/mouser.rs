@@ -16,13 +16,11 @@
 //!    don't roll back the part — operator can attach manually later.
 
 use axum::{extract::State, Json};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::MySqlPool;
 
 use crate::error::AppError;
-use crate::handlers::attachments::{fetch_url_core, AttachmentKind, FetchByUrl};
 use crate::handlers::lookup::{LookupResult, LookupResultParameter, PriceBreak};
 use crate::handlers::storage::StorageConfig;
 
@@ -350,255 +348,21 @@ fn parse_lead_time_days(s: &str) -> Option<i32> {
 }
 
 // ===========================================================================
-//  Import endpoint
+//  Import endpoint — delegates to shared `lookup::import_lookup_result`
+//  with Mouser as the distributor identity.
 // ===========================================================================
-
-#[derive(Debug, Deserialize)]
-pub struct ImportRequest {
-    pub result: LookupResult,
-    pub category_id: i32,
-    pub part_unit_id: i32,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ImportResponse {
-    pub part_id: i32,
-    pub manufacturer_id: i32,
-    pub distributor_id: i32,
-    /// Was the manufacturer just created (vs. matched to an existing
-    /// row)? Frontend uses this to decide whether to bother with the
-    /// image fetch.
-    pub manufacturer_created: bool,
-    /// PartAttachment id if the datasheet was successfully fetched.
-    pub datasheet_attachment_id: Option<i32>,
-    /// Reason the datasheet fetch failed, if it did. Frontend
-    /// surfaces this in the toast.
-    pub datasheet_error: Option<String>,
-    pub logo_attachment_id: Option<i32>,
-    pub logo_error: Option<String>,
-}
 
 pub async fn import(
     State(pool): State<MySqlPool>,
     State(store): State<StorageConfig>,
-    Json(req): Json<ImportRequest>,
-) -> Result<Json<ImportResponse>, AppError> {
-    let r = &req.result;
-    if r.mpn.trim().is_empty() {
-        return Err(AppError::BadRequest("result.mpn is required"));
-    }
-    if r.manufacturer_name.trim().is_empty() {
-        return Err(AppError::BadRequest("result.manufacturer_name is required"));
-    }
-
-    let mut tx = pool.begin().await?;
-
-    // 1. Manufacturer — find by case-insensitive exact name; create if
-    //    missing.
-    let mfg_name = r.manufacturer_name.trim();
-    let existing_mfg: Option<(i32,)> = sqlx::query_as(
-        "SELECT id FROM Manufacturer WHERE LOWER(name) = LOWER(?) LIMIT 1",
-    )
-    .bind(mfg_name)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let (manufacturer_id, manufacturer_created) = match existing_mfg {
-        Some((id,)) => (id, false),
-        None => {
-            let res = sqlx::query("INSERT INTO Manufacturer (name) VALUES (?)")
-                .bind(mfg_name)
-                .execute(&mut *tx)
-                .await?;
-            (res.last_insert_id() as i32, true)
-        }
-    };
-
-    // 2. Mouser distributor — find by case-insensitive name; create
-    //    if missing. (Should exist; safety net.)
-    let dist_existing: Option<(i32,)> = sqlx::query_as(
-        "SELECT id FROM Distributor WHERE LOWER(name) = 'mouser' LIMIT 1",
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let distributor_id = match dist_existing {
-        Some((id,)) => id,
-        None => {
-            let res = sqlx::query(
-                "INSERT INTO Distributor (name, url, enabledForReports) \
-                 VALUES ('Mouser', 'https://www.mouser.com', 1)",
-            )
-            .execute(&mut *tx)
-            .await?;
-            res.last_insert_id() as i32
-        }
-    };
-
-    // 3. Part — name = MPN (matches the convention seen on operator's
-    //    existing parts, where short identifier-like strings live in
-    //    Part.name and the longer freeform text goes in description).
-    //    Fall back to truncated description only when MPN is missing.
-    let desc_full = r.description.trim();
-    let part_name = if !r.mpn.trim().is_empty() {
-        r.mpn.trim().to_string()
-    } else {
-        let mut buf = String::new();
-        for ch in desc_full.chars() {
-            if buf.chars().count() >= 80 { break; }
-            buf.push(ch);
-        }
-        buf
-    };
-
-    let now = Utc::now().naive_utc();
-    let part_res = sqlx::query(
-        "INSERT INTO Part \
-            (category_id, name, description, comment, stockLevel, \
-             minStockLevel, averagePrice, status, needsReview, \
-             partCondition, createDate, partUnit_id, \
-             removals, lowStock, productionRemarks, \
-             internalPartNumber, metaPart) \
-         VALUES (?, ?, ?, '', 0, 0, 0, NULL, 0, NULL, ?, ?, 0, 1, NULL, NULL, 0)",
-    )
-    .bind(req.category_id)
-    .bind(&part_name)
-    .bind(desc_full)
-    .bind(now)
-    .bind(req.part_unit_id)
-    .execute(&mut *tx)
-    .await?;
-    let part_id = part_res.last_insert_id() as i32;
-
-    // 4. PartManufacturer link.
-    sqlx::query(
-        "INSERT INTO PartManufacturer (part_id, manufacturer_id, partNumber) \
-         VALUES (?, ?, ?)",
-    )
-    .bind(part_id)
-    .bind(manufacturer_id)
-    .bind(&r.mpn)
-    .execute(&mut *tx)
-    .await?;
-
-    // 5. PartDistributor link. Use the qty=1 price break as the
-    //    primary price; standard_pack_qty (if set) drives packagingUnit.
-    let primary_break = r.price_breaks.iter()
-        .min_by_key(|pb| pb.quantity);
-    let unit_price: Option<rust_decimal::Decimal> = primary_break
-        .and_then(|pb| pb.price.parse().ok());
-    let currency: Option<&str> = primary_break.map(|pb| pb.currency.as_str());
-    let packaging_unit = r.standard_pack_qty
-        .or(r.order_qty_multiple)
-        .filter(|n| *n > 0)
-        .unwrap_or(1);
-
-    sqlx::query(
-        "INSERT INTO PartDistributor \
-            (part_id, distributor_id, orderNumber, price, currency, \
-             sku, packagingUnit, ignoreForReports) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-    )
-    .bind(part_id)
-    .bind(distributor_id)
-    .bind(&r.distributor_pn)
-    .bind(unit_price)
-    .bind(currency)
-    .bind(&r.mpn)
-    .bind(packaging_unit)
-    .execute(&mut *tx)
-    .await?;
-
-    // 6. PartParameter rows for each ProductAttribute. v1 imports
-    //    everything as string params (Mouser's attributes are mostly
-    //    packaging info; richer parametric data is in the Description
-    //    free-text and would need a parser to extract).
-    for param in &r.parameters {
-        let name = param.name.trim();
-        let value = param.value.trim();
-        if name.is_empty() || value.is_empty() { continue; }
-        sqlx::query(
-            "INSERT INTO PartParameter \
-                (part_id, unit_id, name, description, value, siPrefix_id, \
-                 normalizedValue, maximumValue, normalizedMaxValue, \
-                 minimumValue, normalizedMinValue, stringValue, valueType, \
-                 minSiPrefix_id, maxSiPrefix_id) \
-             VALUES (?, NULL, ?, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'string', NULL, NULL)",
-        )
-        .bind(part_id)
-        .bind(name)
-        .bind(value)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    tx.commit().await?;
-    tracing::info!(part_id, mpn = %r.mpn, "imported part from mouser");
-
-    // 6. Datasheet fetch (best-effort, post-commit). Failures don't
-    //    roll back the part — operator can attach manually.
-    let (datasheet_attachment_id, datasheet_error) = match r.datasheet_url.as_deref() {
-        Some(url) if !url.trim().is_empty() => {
-            match fetch_url_core(
-                &pool, &store, AttachmentKind::PartAttachment, part_id,
-                FetchByUrl { url: url.to_string(), filename: None },
-            ).await {
-                Ok(rows) => (rows.0.first().map(|r| r.id), None),
-                Err(e) => {
-                    let msg = format!("{e:?}");
-                    tracing::warn!(part_id, %msg, "datasheet fetch failed");
-                    (None, Some(strip_apperror(&msg)))
-                }
-            }
-        }
-        _ => (None, None),
-    };
-
-    // 7. Manufacturer image fetch — only when we just created the
-    //    manufacturer. Avoids piling logos on existing manufacturers.
-    let (logo_attachment_id, logo_error) = if manufacturer_created {
-        match r.image_url.as_deref() {
-            Some(url) if !url.trim().is_empty() => {
-                match fetch_url_core(
-                    &pool, &store, AttachmentKind::ManufacturerICLogo, manufacturer_id,
-                    FetchByUrl { url: url.to_string(), filename: None },
-                ).await {
-                    Ok(rows) => (rows.0.first().map(|r| r.id), None),
-                    Err(e) => {
-                        let msg = format!("{e:?}");
-                        tracing::warn!(manufacturer_id, %msg, "logo fetch failed");
-                        (None, Some(strip_apperror(&msg)))
-                    }
-                }
-            }
-            _ => (None, None),
-        }
-    } else {
-        (None, None)
-    };
-
-    Ok(Json(ImportResponse {
-        part_id,
-        manufacturer_id,
-        distributor_id,
-        manufacturer_created,
-        datasheet_attachment_id,
-        datasheet_error,
-        logo_attachment_id,
-        logo_error,
-    }))
-}
-
-/// Pull a human-readable message out of an `AppError` debug string.
-/// `AppError` doesn't impl Display; this is a best-effort extraction.
-fn strip_apperror(dbg: &str) -> String {
-    // Common shapes:
-    //   `BadRequest("message")` → "message"
-    //   `Internal("message")` → "message"
-    //   `NotFound("name")` → "name not found"
-    if let Some(start) = dbg.find('"') {
-        let rest = &dbg[start + 1..];
-        if let Some(end) = rest.rfind('"') {
-            return rest[..end].to_string();
-        }
-    }
-    dbg.to_string()
+    Json(req): Json<crate::handlers::lookup::ImportRequest>,
+) -> Result<Json<crate::handlers::lookup::ImportResponse>, AppError> {
+    let resp = crate::handlers::lookup::import_lookup_result(
+        &pool, &store, req,
+        crate::handlers::lookup::DistributorIdentity {
+            name: "Mouser",
+            url:  "https://www.mouser.com",
+        },
+    ).await?;
+    Ok(Json(resp))
 }

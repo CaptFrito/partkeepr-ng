@@ -537,24 +537,24 @@
             if (!r.ok) throw new Error(`lookup capabilities failed: ${r.status}`);
             return r.json();
         },
-        async mouserSearch(q, by) {
-            const r = await fetch("/api/lookup/mouser/search", {
+        async lookupSearch(source, q, by) {
+            const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/search`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ q, by }),
             });
             const data = await r.json().catch(() => null);
-            if (!r.ok) throw new Error((data && data.error) || `mouser search failed: ${r.status}`);
+            if (!r.ok) throw new Error((data && data.error) || `${source} search failed: ${r.status}`);
             return data;
         },
-        async mouserImport(result, categoryId, partUnitId) {
-            const r = await fetch("/api/lookup/mouser/import", {
+        async lookupImport(source, result, categoryId, partUnitId) {
+            const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/import`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ result, category_id: categoryId, part_unit_id: partUnitId }),
             });
             const data = await r.json().catch(() => null);
-            if (!r.ok) throw new Error((data && data.error) || `mouser import failed: ${r.status}`);
+            if (!r.ok) throw new Error((data && data.error) || `${source} import failed: ${r.status}`);
             return data;
         },
         async metaMatches(metaPartId) {
@@ -3319,12 +3319,12 @@
                         },
                         {
                             view: "button",
-                            id: "pk-mouser-button",
-                            value: "🔎 Add via Mouser",
+                            id: "pk-lookup-button",
+                            value: "🔎 Add via lookup",
                             css: "pk-btn-add",
                             width: 165,
-                            hidden: true,  // shown only when capabilities reports available
-                            click: () => openMouserSearchDialog(),
+                            hidden: true,  // shown only when ≥1 source is configured
+                            click: () => openLookupSearchDialog(),
                         },
                         {
                             view: "button",
@@ -7228,8 +7228,20 @@
 
     let lookupCapsCache = null;
 
-    /// Pull capabilities once after the shell mounts; reveal the
-    /// "🔎 Add via Mouser" button when configured.
+    /// Returns the list of source ids that the backend reports as
+    /// available right now. Order is the order we want to render
+    /// in the source picker.
+    function availableLookupSources() {
+        if (!lookupCapsCache) return [];
+        const sources = [];
+        if (lookupCapsCache.digikey && lookupCapsCache.digikey.available) sources.push("digikey");
+        if (lookupCapsCache.mouser && lookupCapsCache.mouser.available)   sources.push("mouser");
+        return sources;
+    }
+
+    /// Pull capabilities once after the shell mounts. Reveal the
+    /// "🔎 Add via lookup" button when any source is available, and
+    /// re-label it to be source-specific when only one is.
     async function refreshLookupCapabilities() {
         try {
             lookupCapsCache = await api.lookupCapabilities();
@@ -7237,13 +7249,20 @@
             console.warn("lookupCapabilities failed:", e);
             return;
         }
-        const btn = $$("pk-mouser-button");
-        if (btn && lookupCapsCache && lookupCapsCache.mouser && lookupCapsCache.mouser.available) {
-            btn.show();
+        const btn = $$("pk-lookup-button");
+        if (!btn) return;
+        const sources = availableLookupSources();
+        if (sources.length === 0) return;  // stay hidden
+        if (sources.length === 1) {
+            const label = sources[0] === "digikey" ? "🔎 Add via Digi-Key" : "🔎 Add via Mouser";
+            btn.define("value", label);
+            btn.refresh();
         }
+        // (>1 sources: keep the default "🔎 Add via lookup")
+        btn.show();
     }
 
-    async function openMouserSearchDialog() {
+    async function openLookupSearchDialog() {
         // Make sure lookupsCache is loaded — categories + part_units
         // power the two dropdowns at the bottom of the dialog. Same
         // pattern as openPartEditor / openCommonParamsDialog.
@@ -7263,12 +7282,28 @@
             || lookupsCache.part_units[0];
         const defaultCategory = categoryOptions[0];
 
-        // Track the selected result by id so the Import button can
-        // grab it from the cached items list.
+        // Track the selected result + its source.
         let lastSearchItems = [];
         let selectedResult = null;
 
-        const winId = "pk-mouser-dialog";
+        // Source picker: persist last choice per-user in localStorage.
+        const sources = availableLookupSources();
+        const sourcePersistKey = `pk:lookup:last-source:${currentUser ? currentUser.username : "anon"}`;
+        let activeSource = (function () {
+            const saved = localStorage.getItem(sourcePersistKey);
+            if (saved && sources.includes(saved)) return saved;
+            // Default: digikey first (richer data), else mouser.
+            return sources[0] || "mouser";
+        })();
+        const sourceOptions = sources.map((s) => ({
+            id: s,
+            value: s === "digikey" ? "Digi-Key" : "Mouser",
+        }));
+
+        const winId = "pk-lookup-dialog";
+
+        // The header reflects whichever source is currently active.
+        const headFor = (s) => s === "digikey" ? "Add part via Digi-Key" : "Add part via Mouser";
 
         webix.ui({
             view: "window",
@@ -7277,9 +7312,42 @@
             position: "center",
             width: 980,
             height: 640,
-            head: "Add part via Mouser",
+            head: headFor(activeSource),
             body: {
                 rows: [
+                    // Source picker — shown only when 2+ sources available.
+                    sources.length >= 2
+                        ? {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 40,
+                            cols: [
+                                { view: "label", label: "Source:", width: 75, css: "pk-pane-title" },
+                                {
+                                    view: "segmented",
+                                    id: "pk-lookup-source",
+                                    value: activeSource,
+                                    width: 320,
+                                    options: sourceOptions,
+                                    on: {
+                                        onChange: function (newSrc) {
+                                            activeSource = newSrc;
+                                            localStorage.setItem(sourcePersistKey, newSrc);
+                                            const win = $$(winId);
+                                            if (win) win.config.head = headFor(newSrc);
+                                            // Clear results — they're stale.
+                                            const grid = $$("pk-lookup-results");
+                                            if (grid) grid.clearAll();
+                                            $$("pk-lookup-import-btn").disable();
+                                            selectedResult = null;
+                                            updateSelectedLabel();
+                                        },
+                                    },
+                                },
+                                {},
+                            ],
+                        }
+                        : { hidden: true, height: 0 },
                     {
                         view: "toolbar",
                         css: "pk-pane-toolbar",
@@ -7287,7 +7355,7 @@
                         cols: [
                             {
                                 view: "segmented",
-                                id: "pk-mouser-by",
+                                id: "pk-lookup-by",
                                 value: "partnumber",
                                 width: 280,
                                 options: [
@@ -7297,20 +7365,20 @@
                             },
                             {
                                 view: "search",
-                                id: "pk-mouser-q",
+                                id: "pk-lookup-q",
                                 placeholder: "MPN or keyword…",
                                 on: {
-                                    onEnter: function () { runMouserSearch(); },
-                                    onSearchIconClick: function () { runMouserSearch(); },
+                                    onEnter: function () { runLookupSearch(); },
+                                    onSearchIconClick: function () { runLookupSearch(); },
                                 },
                             },
                             { view: "button", value: "🔎 Search", width: 110, css: "webix_primary",
-                              click: () => runMouserSearch() },
+                              click: () => runLookupSearch() },
                         ],
                     },
                     {
                         view: "datatable",
-                        id: "pk-mouser-results",
+                        id: "pk-lookup-results",
                         css: "pk-grid",
                         select: "row",
                         columns: [
@@ -7319,7 +7387,6 @@
                             { id: "description", header: "Description", fillspace: true },
                             { id: "_stock", header: "Stock", width: 90, css: "pk-numeric",
                               template: (o) => {
-                                  // availability looks like "In Stock: 1234"
                                   const m = (o.availability || "").match(/(\d[\d,]*)/);
                                   return m ? m[1] : "";
                               } },
@@ -7328,27 +7395,29 @@
                                   const pb = (o.price_breaks || [])[0];
                                   return pb ? `${pb.price} ${pb.currency}` : "";
                               } },
-                            { id: "distributor_pn", header: "Mouser P/N", width: 140 },
+                            { id: "_params", header: "Params", width: 70, css: "pk-numeric",
+                              template: (o) => (o.parameters || []).length || "" },
+                            { id: "distributor_pn", header: "Distributor P/N", width: 140 },
                         ],
                         on: {
                             onAfterSelect: function (sel) {
                                 const item = this.getItem(sel.id);
                                 selectedResult = item || null;
-                                refreshSelectedLabel();
-                                $$("pk-mouser-import-btn").enable();
+                                updateSelectedLabel();
+                                $$("pk-lookup-import-btn").enable();
                             },
                         },
                     },
                     {
                         view: "template",
-                        id: "pk-mouser-selected",
+                        id: "pk-lookup-selected",
                         height: 26,
                         borderless: true,
                         template: '<span style="padding:0 12px;color:#6a7a8a">Pick a result, then choose category + unit and click Import.</span>',
                     },
                     {
                         view: "form",
-                        id: "pk-mouser-form",
+                        id: "pk-lookup-form",
                         height: 70,
                         elementsConfig: { labelWidth: 90 },
                         elements: [
@@ -7373,7 +7442,7 @@
                             { view: "button", value: "Cancel", width: 100, click: () => $$(winId).close() },
                             {
                                 view: "button",
-                                id: "pk-mouser-import-btn",
+                                id: "pk-lookup-import-btn",
                                 value: "Import",
                                 width: 130,
                                 css: "pk-btn-add",
@@ -7386,25 +7455,32 @@
             },
         }).show();
 
-        function refreshSelectedLabel() {
-            const t = $$("pk-mouser-selected");
-            if (!t || !selectedResult) return;
-            t.setHTML(`<span style="padding:0 12px;color:#1f2933">Selected: <b>${escapeHtml(selectedResult.mpn)}</b> — ${escapeHtml(selectedResult.manufacturer_name)}</span>`);
+        function updateSelectedLabel() {
+            const t = $$("pk-lookup-selected");
+            if (!t) return;
+            if (!selectedResult) {
+                t.setHTML('<span style="padding:0 12px;color:#6a7a8a">Pick a result, then choose category + unit and click Import.</span>');
+                return;
+            }
+            const paramCount = (selectedResult.parameters || []).length;
+            const paramHint = paramCount ? ` <span style="color:#6a7a8a">(${paramCount} parameters)</span>` : "";
+            t.setHTML(`<span style="padding:0 12px;color:#1f2933">Selected: <b>${escapeHtml(selectedResult.mpn)}</b> — ${escapeHtml(selectedResult.manufacturer_name)}${paramHint}</span>`);
         }
 
-        async function runMouserSearch() {
-            const q = ($$("pk-mouser-q").getValue() || "").trim();
-            const by = $$("pk-mouser-by").getValue() || "partnumber";
+        async function runLookupSearch() {
+            const q = ($$("pk-lookup-q").getValue() || "").trim();
+            const by = $$("pk-lookup-by").getValue() || "partnumber";
             if (!q) {
                 webix.message({ type: "error", text: "Type something to search" });
                 return;
             }
-            const grid = $$("pk-mouser-results");
-            if (grid) { grid.clearAll(); }
-            $$("pk-mouser-import-btn").disable();
+            const grid = $$("pk-lookup-results");
+            if (grid) grid.clearAll();
+            $$("pk-lookup-import-btn").disable();
             selectedResult = null;
+            updateSelectedLabel();
             try {
-                const resp = await api.mouserSearch(q, by);
+                const resp = await api.lookupSearch(activeSource, q, by);
                 lastSearchItems = (resp.items || []).map((it, i) => Object.assign({ id: i + 1 }, it));
                 if (grid) grid.parse(lastSearchItems);
                 if (resp.errors && resp.errors.length) {
@@ -7421,34 +7497,28 @@
 
         async function importSelected() {
             if (!selectedResult) return;
-            const v = $$("pk-mouser-form").getValues();
+            const v = $$("pk-lookup-form").getValues();
             const categoryId = parseInt(v.category_id, 10);
             const partUnitId = parseInt(v.part_unit_id, 10);
             if (!categoryId || !partUnitId) {
                 webix.message({ type: "error", text: "Pick a category and a unit" });
                 return;
             }
-            // Strip the synthetic id we added for the datatable.
             const result = Object.assign({}, selectedResult);
             delete result.id;
             try {
-                const resp = await api.mouserImport(result, categoryId, partUnitId);
+                const resp = await api.lookupImport(activeSource, result, categoryId, partUnitId);
                 $$(winId).close();
-                // Tell the operator what landed; warn separately on
-                // attachment-fetch failures.
                 const bits = [`Imported ${selectedResult.mpn}`];
+                const paramCount = (selectedResult.parameters || []).length;
+                if (paramCount) bits.push(`${paramCount} parameters`);
                 if (resp.datasheet_attachment_id) bits.push("datasheet ✓");
                 else if (resp.datasheet_error) bits.push("datasheet ⚠");
                 if (resp.logo_attachment_id) bits.push("logo ✓");
                 else if (resp.logo_error) bits.push("logo ⚠");
                 webix.message({ type: "success", text: bits.join(" · ") });
-                if (resp.datasheet_error) {
-                    console.warn("datasheet fetch failed:", resp.datasheet_error);
-                }
-                if (resp.logo_error) {
-                    console.warn("logo fetch failed:", resp.logo_error);
-                }
-                // Refresh the parts grid + select the new part.
+                if (resp.datasheet_error) console.warn("datasheet fetch failed:", resp.datasheet_error);
+                if (resp.logo_error) console.warn("logo fetch failed:", resp.logo_error);
                 await loadParts({ search: "" });
                 const grid = $$("pk-parts-grid");
                 if (grid && grid.exists(resp.part_id)) {
