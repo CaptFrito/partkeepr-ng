@@ -187,7 +187,7 @@ pub async fn list_part_receipts(
         "SELECT se.distributor_id AS distributor_id, \
                 d.name AS distributor_name, \
                 se.salesOrderNumber AS sales_order_number, \
-                SUM(se.stockLevel) AS units_added, \
+                CAST(SUM(se.stockLevel) AS SIGNED) AS units_added, \
                 AVG(NULLIF(se.price, 0)) AS avg_unit_price, \
                 MAX(NULLIF(pd.currency, '')) AS currency, \
                 MIN(se.dateTime) AS first_date, \
