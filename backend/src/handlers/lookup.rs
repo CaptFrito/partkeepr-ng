@@ -275,26 +275,62 @@ pub async fn import_lookup_result(
     .execute(&mut *tx)
     .await?;
 
-    // 6. PartParameter rows for each source-supplied parameter. v1
-    //    imports everything as string params — operator can re-type
-    //    individual ones as numeric+unit afterwards.
+    // 6. PartParameter rows for each source-supplied parameter.
+    //    Try parsing each value as `<number>[<si-prefix><unit>]` so
+    //    "1.1 MHz" → numeric/Hz/M, "200 mA" → numeric/A/m, etc.
+    //    Anything that doesn't parse cleanly (composite units like
+    //    "0.6V/µs", ranges like "0°C ~ 70°C", strings like
+    //    "Surface Mount") falls through as a string parameter.
+    let unit_lookup: Vec<(i32, String)> = if r.parameters.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as("SELECT id, symbol FROM Unit ORDER BY id")
+            .fetch_all(&mut *tx).await?
+    };
+    let prefix_lookup: Vec<(i32, String, i32, i32)> = if r.parameters.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as("SELECT id, symbol, base, exponent FROM SiPrefix ORDER BY id")
+            .fetch_all(&mut *tx).await?
+    };
+
     for param in &r.parameters {
         let name = param.name.trim();
         let value = param.value.trim();
         if name.is_empty() || value.is_empty() { continue; }
-        sqlx::query(
-            "INSERT INTO PartParameter \
-                (part_id, unit_id, name, description, value, siPrefix_id, \
-                 normalizedValue, maximumValue, normalizedMaxValue, \
-                 minimumValue, normalizedMinValue, stringValue, valueType, \
-                 minSiPrefix_id, maxSiPrefix_id) \
-             VALUES (?, NULL, ?, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'string', NULL, NULL)",
-        )
-        .bind(part_id)
-        .bind(name)
-        .bind(value)
-        .execute(&mut *tx)
-        .await?;
+
+        if let Some(p) = parse_numeric_param(value, &unit_lookup, &prefix_lookup) {
+            sqlx::query(
+                "INSERT INTO PartParameter \
+                    (part_id, unit_id, name, description, value, siPrefix_id, \
+                     normalizedValue, maximumValue, normalizedMaxValue, \
+                     minimumValue, normalizedMinValue, stringValue, valueType, \
+                     minSiPrefix_id, maxSiPrefix_id) \
+                 VALUES (?, ?, ?, '', ?, ?, ?, NULL, NULL, NULL, NULL, '', 'numeric', NULL, NULL)",
+            )
+            .bind(part_id)
+            .bind(p.unit_id)
+            .bind(name)
+            .bind(p.value)
+            .bind(p.si_prefix_id)
+            .bind(p.normalized_value)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO PartParameter \
+                    (part_id, unit_id, name, description, value, siPrefix_id, \
+                     normalizedValue, maximumValue, normalizedMaxValue, \
+                     minimumValue, normalizedMinValue, stringValue, valueType, \
+                     minSiPrefix_id, maxSiPrefix_id) \
+                 VALUES (?, NULL, ?, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'string', NULL, NULL)",
+            )
+            .bind(part_id)
+            .bind(name)
+            .bind(value)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
 
     tx.commit().await?;
@@ -360,4 +396,117 @@ fn strip_apperror(dbg: &str) -> String {
         }
     }
     dbg.to_string()
+}
+
+// ===========================================================================
+//  Numeric parameter parsing
+//
+//  Source APIs (Digi-Key especially) return parameters as strings:
+//  "1.1 MHz", "200 mA", "30 V", "0°C ~ 70°C", "8-SOIC (0.154", 3.90mm Width)".
+//  Try to parse the simple cases (`<number><whitespace?><si-prefix?><unit?>`)
+//  into structured numeric/unit/prefix triples so parametric search
+//  works across them. Reject anything composite (slashes, parens,
+//  ranges, multiple words) — those stay as string parameters.
+// ===========================================================================
+
+pub(crate) struct ParsedNumeric {
+    pub value: f64,
+    pub si_prefix_id: Option<i32>,
+    pub unit_id: Option<i32>,
+    pub normalized_value: f64,
+}
+
+/// Match `<number>[<si-prefix?><unit?>]` against the install's live
+/// SiPrefix + Unit tables. Returns Some on a clean parse; None when
+/// the string is too complex to interpret as a single numeric value
+/// (e.g., "0°C ~ 70°C", "0.6V/µs", "Surface Mount").
+pub(crate) fn parse_numeric_param(
+    raw: &str,
+    units: &[(i32, String)],
+    prefixes: &[(i32, String, i32, i32)],
+) -> Option<ParsedNumeric> {
+    let s = raw.trim();
+    let (value, rest) = parse_leading_number(s)?;
+    let suffix = rest.trim();
+
+    // No suffix at all → numeric without unit (e.g., "Number of
+    // Circuits = 2"). Allow.
+    if suffix.is_empty() {
+        return Some(ParsedNumeric {
+            value, si_prefix_id: None, unit_id: None, normalized_value: value,
+        });
+    }
+    // Reject compound or qualified units. Also reject suffixes with
+    // any internal whitespace (multi-word descriptors aren't units).
+    if suffix.chars().any(|c| matches!(c, '/' | '(' | ')' | ',' | '~' | ';' | '@' | '*'))
+        || suffix.split_whitespace().count() > 1
+    {
+        return None;
+    }
+    let suffix = suffix.split_whitespace().next().unwrap_or(suffix);
+
+    // 1. Try matching the whole suffix as a unit symbol (no prefix).
+    if let Some((uid, _)) = units.iter().find(|(_, sym)| sym == suffix) {
+        return Some(ParsedNumeric {
+            value,
+            si_prefix_id: None,
+            unit_id: Some(*uid),
+            normalized_value: value,
+        });
+    }
+
+    // 2. Try (prefix + unit) splits. Iterate prefixes longest-first
+    //    so multi-char prefixes (Ki, da, etc.) match before single-
+    //    char ones with the same lead character.
+    let mut sorted: Vec<&(i32, String, i32, i32)> = prefixes.iter().collect();
+    sorted.sort_by_key(|(_, sym, _, _)| std::cmp::Reverse(sym.chars().count()));
+
+    for (pid, psym, pbase, pexp) in sorted {
+        if psym.is_empty() { continue; }  // already covered by case 1
+        // Mu-symbol variants — Digi-Key sometimes uses U+00B5 (µ),
+        // sometimes Greek mu U+03BC (μ), sometimes ASCII "u".
+        let candidates: Vec<&str> = if psym == "μ" || psym == "µ" {
+            vec!["μ", "µ", "u"]
+        } else {
+            vec![psym.as_str()]
+        };
+        for cand in candidates {
+            if let Some(unit_part) = suffix.strip_prefix(cand) {
+                if let Some((uid, _)) = units.iter().find(|(_, sym)| sym == unit_part) {
+                    let base_f = *pbase as f64;
+                    let normalized_value = value * base_f.powi(*pexp);
+                    return Some(ParsedNumeric {
+                        value,
+                        si_prefix_id: Some(*pid),
+                        unit_id: Some(*uid),
+                        normalized_value,
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Pull a leading f64 off the start of `s`. Returns the parsed value
+/// and the unconsumed remainder. Accepts an optional sign, a decimal
+/// point, and (no scientific notation; we haven't seen Digi-Key emit
+/// any).
+fn parse_leading_number(s: &str) -> Option<(f64, &str)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut seen_digit = false;
+    let mut seen_dot = false;
+    if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'+') { i += 1; }
+    while i < bytes.len() {
+        match bytes[i] {
+            b'0'..=b'9' => { seen_digit = true; i += 1; }
+            b'.' if !seen_dot => { seen_dot = true; i += 1; }
+            _ => break,
+        }
+    }
+    if !seen_digit { return None; }
+    let value: f64 = s[..i].parse().ok()?;
+    Some((value, &s[i..]))
 }

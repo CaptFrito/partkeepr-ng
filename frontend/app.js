@@ -3296,6 +3296,10 @@
 
     function buildPartsGridRows() {
         return [
+                // Row 1: title + create-actions. Keeps the "I want to
+                // make a part" affordances visually grouped and the
+                // toolbar narrow enough that the center pane can be
+                // shrunk meaningfully.
                 {
                     view: "toolbar",
                     css: "pk-pane-toolbar",
@@ -3333,6 +3337,16 @@
                             width: 130,
                             click: () => openPartEditor("duplicate"),
                         },
+                    ],
+                },
+                // Row 2: view toggles + filters + search. Lets the
+                // operator narrow the center pane without losing
+                // any controls.
+                {
+                    view: "toolbar",
+                    css: "pk-pane-toolbar",
+                    height: 40,
+                    cols: [
                         {
                             view: "toggle",
                             id: "pk-filters-toggle",
@@ -3373,11 +3387,12 @@
                                 },
                             },
                         },
+                        {},
                         {
                             view: "search",
                             id: "pk-search",
                             placeholder: "Search name / description / IPN…",
-                            width: 280,
+                            width: 320,
                             on: {
                                 onTimedKeyPress: function () {
                                     currentParts.search = this.getValue().trim();
@@ -5791,7 +5806,13 @@
     function flattenCategoryTree(tree) {
         const out = [];
         function walk(nodes, indent) {
-            for (const n of nodes) {
+            // Sort siblings alphabetically (case-insensitive); preserves
+            // hierarchy while making it easier to find a category by
+            // name in long lists.
+            const sorted = nodes.slice().sort((a, b) =>
+                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
+            );
+            for (const n of sorted) {
                 const prefix = "  ".repeat(indent);
                 out.push({ id: n.id, value: prefix + n.name });
                 if (n.children && n.children.length) walk(n.children, indent + 1);
@@ -7280,7 +7301,22 @@
         // Prefer the is_default=true row if present.
         const defaultPartUnit = lookupsCache.part_units.find((u) => u.is_default)
             || lookupsCache.part_units[0];
-        const defaultCategory = categoryOptions[0];
+        // Prefer whatever category the operator has selected in the
+        // left tree pane (so "I'm in Resistors → click Add via lookup
+        // → search → Import" lands in Resistors, not the root). Falls
+        // back to the first category in the list.
+        const selectedCatId = (function () {
+            const tree = $$("pk-cat-tree");
+            if (!tree) return null;
+            const id = tree.getSelectedId && tree.getSelectedId();
+            // The tree carries non-category rows too (storage etc.);
+            // only use the selection if it matches a category.
+            if (id && categoryOptions.some((c) => String(c.id) === String(id))) {
+                return id;
+            }
+            return null;
+        })();
+        const defaultCategoryId = selectedCatId || (categoryOptions[0] && categoryOptions[0].id) || null;
 
         // Track the selected result + its source.
         let lastSearchItems = [];
@@ -7425,7 +7461,7 @@
                                 cols: [
                                     { view: "richselect", name: "category_id", label: "Category",
                                       options: categoryOptions,
-                                      value: defaultCategory ? defaultCategory.id : null },
+                                      value: defaultCategoryId },
                                     { view: "richselect", name: "part_unit_id", label: "Unit",
                                       options: partUnitOptions, width: 280,
                                       value: defaultPartUnit ? defaultPartUnit.id : null },
