@@ -11,9 +11,9 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 
 use crate::error::AppError;
@@ -52,6 +52,7 @@ pub async fn create_stock_entry(
         req.comment.as_deref(),
         req.correction,
         user.user_id,
+        OrderAttribution::default(),
     )
     .await?;
     let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
@@ -62,10 +63,24 @@ pub async fn create_stock_entry(
     Ok(Json(updated))
 }
 
+/// Per-entry order attribution. Optional — only populated by the
+/// distributor receive flows (Digi-Key Order Status today; Mouser
+/// Order History eventually). Manual stock changes leave both NULL.
+#[derive(Debug, Clone, Default)]
+pub struct OrderAttribution<'a> {
+    pub distributor_id: Option<i32>,
+    pub sales_order_number: Option<&'a str>,
+}
+
 /// Insert a StockEntry and re-derive `Part.stockLevel` /
 /// `averagePrice` / `lowStock`. Reused by the project-run handler so a
 /// run's per-line stock decrements use exactly the same accounting as
 /// manual stock add/remove. Caller owns the transaction.
+///
+/// `attribution` populates the structured `(distributor_id,
+/// salesOrderNumber)` columns introduced by the slice 12b.2 follow-on
+/// migration. Pass `OrderAttribution::default()` for plain manual
+/// entries (both fields stay NULL).
 ///
 /// Returns (current_stock_after, low_stock_after) for convenience —
 /// run_project surfaces these in the response so the UI can confirm
@@ -78,6 +93,7 @@ pub async fn apply_stock_change_in_tx(
     comment: Option<&str>,
     correction: bool,
     user_id: i32,
+    attribution: OrderAttribution<'_>,
 ) -> Result<(i32, bool), AppError> {
     if delta == 0 {
         return Err(AppError::BadRequest("stock delta cannot be zero"));
@@ -94,8 +110,9 @@ pub async fn apply_stock_change_in_tx(
     let now = Utc::now().naive_utc();
     sqlx::query(
         "INSERT INTO StockEntry \
-            (part_id, user_id, stockLevel, price, dateTime, correction, comment) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (part_id, user_id, stockLevel, price, dateTime, correction, comment, \
+             distributor_id, salesOrderNumber) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(part_id)
     .bind(user_id)
@@ -104,6 +121,8 @@ pub async fn apply_stock_change_in_tx(
     .bind(now)
     .bind(correction)
     .bind(comment)
+    .bind(attribution.distributor_id)
+    .bind(attribution.sales_order_number)
     .execute(&mut **tx)
     .await?;
 
@@ -130,6 +149,66 @@ pub async fn apply_stock_change_in_tx(
     .await?;
 
     Ok((current_stock, low_stock))
+}
+
+/// Per-part receipt aggregation: for each (distributor, sales_order)
+/// pair the part has *positive* StockEntry rows tagged with, sum the
+/// units and average the unit price. "Manual" / pre-12b.2 receipts
+/// land under `(NULL, NULL)` and are filtered out — operators who
+/// want full history can use the existing stock-history view.
+///
+/// Used by the part-detail Receipts panel: "this part has been
+/// received from N orders, here are the unit counts and dates."
+/// Helpful for stock-age analysis when paired with the StockEntry
+/// timeline.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PartReceiptRow {
+    pub distributor_id: i32,
+    pub distributor_name: String,
+    pub sales_order_number: String,
+    pub units_added: i64,         // SUM(stockLevel) for positive entries
+    pub avg_unit_price: Option<Decimal>,
+    pub currency: Option<String>,
+    pub first_date: NaiveDateTime,
+    pub last_date: NaiveDateTime,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PartReceiptsResponse {
+    pub receipts: Vec<PartReceiptRow>,
+}
+
+pub async fn list_part_receipts(
+    State(pool): State<MySqlPool>,
+    Path(part_id): Path<i32>,
+) -> Result<Json<PartReceiptsResponse>, AppError> {
+    let receipts: Vec<PartReceiptRow> = sqlx::query_as(
+        "SELECT se.distributor_id AS distributor_id, \
+                d.name AS distributor_name, \
+                se.salesOrderNumber AS sales_order_number, \
+                SUM(se.stockLevel) AS units_added, \
+                AVG(NULLIF(se.price, 0)) AS avg_unit_price, \
+                MAX(NULLIF(pd.currency, '')) AS currency, \
+                MIN(se.dateTime) AS first_date, \
+                MAX(se.dateTime) AS last_date, \
+                COUNT(*) AS entry_count \
+         FROM StockEntry se \
+         JOIN Distributor d ON d.id = se.distributor_id \
+         LEFT JOIN PartDistributor pd \
+                ON pd.part_id = se.part_id AND pd.distributor_id = se.distributor_id \
+         WHERE se.part_id = ? \
+           AND se.distributor_id IS NOT NULL \
+           AND se.salesOrderNumber IS NOT NULL \
+           AND se.stockLevel > 0 \
+         GROUP BY se.distributor_id, d.name, se.salesOrderNumber \
+         ORDER BY MAX(se.dateTime) DESC",
+    )
+    .bind(part_id)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(Json(PartReceiptsResponse { receipts }))
 }
 
 /// Walk chronological stock entries to derive current stock + avg price.

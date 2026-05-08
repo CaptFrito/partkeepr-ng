@@ -53,6 +53,7 @@ pub fn routes() -> Router<AppState> {
             get(parts::detail).put(parts::update).delete(parts::delete),
         )
         .route("/api/parts/:id/stock-entries", post(stock::create_stock_entry))
+        .route("/api/parts/:id/stock-receipts", get(stock::list_part_receipts))
         // Slice 5c-2: storage locations.
         .route("/api/storage_tree", get(storage_locations::tree))
         .route(

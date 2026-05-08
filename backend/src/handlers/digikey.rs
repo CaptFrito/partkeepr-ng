@@ -781,6 +781,25 @@ pub async fn order_receive(
     }
 
     let mut tx = pool.begin().await?;
+
+    // Resolve Digi-Key distributor_id once. If the row doesn't exist
+    // yet (operator never imported via Digi-Key, but is using an
+    // SO# import flow somehow), create it — same auto-create the
+    // import path uses.
+    let dk_id = match sqlx::query_as::<_, (i32,)>(
+        "SELECT id FROM Distributor WHERE LOWER(name) = 'digi-key' LIMIT 1",
+    ).fetch_optional(&mut *tx).await? {
+        Some((id,)) => id,
+        None => {
+            let res = sqlx::query(
+                "INSERT INTO Distributor (name, url, enabledForReports) \
+                 VALUES ('Digi-Key', 'https://www.digikey.com', 1)",
+            ).execute(&mut *tx).await?;
+            res.last_insert_id() as i32
+        }
+    };
+    let so_str = req.order_id.to_string();
+
     let mut results: Vec<OrderReceiveResult> = Vec::with_capacity(req.lines.len());
     for (idx, line) in req.lines.iter().enumerate() {
         let default_comment = format!("Digi-Key SO #{} line {}", req.order_id, idx + 1);
@@ -794,6 +813,10 @@ pub async fn order_receive(
             Some(comment),
             false, // not a correction — real receipt
             user.user_id,
+            crate::handlers::stock::OrderAttribution {
+                distributor_id: Some(dk_id),
+                sales_order_number: Some(&so_str),
+            },
         ).await?;
         results.push(OrderReceiveResult {
             part_id: line.part_id,

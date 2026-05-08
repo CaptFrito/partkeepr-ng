@@ -796,6 +796,7 @@ pub async fn run_project(
                 Some(&comment_base),
                 false,
                 user.user_id,
+                stock::OrderAttribution::default(),
             )
             .await
             .map_err(|e| match e {
@@ -929,6 +930,7 @@ pub async fn delete_run(
                         Some(&comment),
                         false,
                         user.user_id,
+                        stock::OrderAttribution::default(),
                     )
                     .await?;
                 }

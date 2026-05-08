@@ -485,6 +485,12 @@
             if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
             return r.json();
         },
+        async partReceipts(partId) {
+            const r = await fetch(`/api/parts/${partId}/stock-receipts`);
+            if (!r.ok) throw new Error(`part-receipts failed: ${r.status}`);
+            const data = await r.json();
+            return data.receipts || [];
+        },
         async partLocations(partId) {
             const r = await fetch(`/api/parts/${partId}/locations`);
             if (!r.ok) throw new Error(`locations list failed: ${r.status}`);
@@ -4836,13 +4842,14 @@
 
     async function loadPartDetail(id) {
         try {
-            const [part, projects, runs] = await Promise.all([
+            const [part, projects, runs, receipts] = await Promise.all([
                 api.part(id),
                 api.partProjects(id).catch(() => []),
                 api.partRuns(id).catch(() => []),
+                api.partReceipts(id).catch(() => []),
             ]);
             currentPart = part;
-            $$("pk-detail").setHTML(renderPartDetailHtml(part, projects, runs));
+            $$("pk-detail").setHTML(renderPartDetailHtml(part, projects, runs, receipts));
             const actions = $$("pk-detail-actions");
             if (actions) actions.show();
             // Wire up project links in the cross-cutting sections.
@@ -5468,7 +5475,7 @@
         });
     }
 
-    function renderPartDetailHtml(p, projects, runs) {
+    function renderPartDetailHtml(p, projects, runs, receipts) {
         const sections = [];
 
         // Header
@@ -5588,6 +5595,27 @@
             }).join("");
             sections.push(detailSectionHtml(`Recent stock activity`,
                 `<table class="pk-detail-table"><thead><tr><th>Date</th><th>Δ</th><th>Price</th><th>By</th></tr></thead><tbody>${rows}</tbody></table>`));
+        }
+
+        // Distributor-attributed receipts (slice 12b.2 follow-on).
+        // One row per (distributor, sales order #); useful for stock
+        // age and "which order is this batch from" tracking.
+        if (receipts && receipts.length) {
+            const rows = receipts.map((rcp) => {
+                const date = (rcp.last_date || "").substring(0, 10);
+                const cur = rcp.currency || "";
+                const price = rcp.avg_unit_price ? `${rcp.avg_unit_price} ${cur}` : "";
+                const partial = (rcp.entry_count > 1) ? ` <span class="pk-help-hint">(${rcp.entry_count} entries)</span>` : "";
+                return `<tr>
+                    <td>${escapeHtml(rcp.distributor_name || "")}</td>
+                    <td>${escapeHtml(rcp.sales_order_number || "")}${partial}</td>
+                    <td class="pk-numeric">+${rcp.units_added}</td>
+                    <td class="pk-numeric">${escapeHtml(price)}</td>
+                    <td>${escapeHtml(date)}</td>
+                </tr>`;
+            }).join("");
+            sections.push(detailSectionHtml(`Receipts by sales order (${receipts.length})`,
+                `<table class="pk-detail-table"><thead><tr><th>Distributor</th><th>SO #</th><th>Units</th><th>Unit price</th><th>Last received</th></tr></thead><tbody>${rows}</tbody></table>`));
         }
 
         // Attachments
@@ -7712,8 +7740,9 @@
                         columns: [
                             {
                                 id: "_apply",
-                                header: { text: "✓", css: "right" },
-                                width: 40,
+                                header: { text: "Apply", css: "right" },
+                                tooltip: "Include this line in the Apply stock-in batch",
+                                width: 64,
                                 template: "{common.checkbox()}",
                                 checkValue: true,
                                 uncheckValue: false,
