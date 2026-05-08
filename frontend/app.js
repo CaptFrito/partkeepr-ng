@@ -819,6 +819,134 @@
         };
     }
 
+    /// Form ENUM values for PartStorageLocation. Mirrors the backend
+    /// VALID_FORMS list in handlers/part_locations.rs.
+    const SCAN_FORM_OPTIONS = [
+        { id: "Reel",    value: "Reel" },
+        { id: "CutTape", value: "CutTape" },
+        { id: "Loose",   value: "Loose" },
+        { id: "Tray",    value: "Tray" },
+        { id: "Tube",    value: "Tube" },
+        { id: "Feeder",  value: "Feeder" },
+        { id: "Bag",     value: "Bag" },
+        { id: "Other",   value: "Other" },
+    ];
+
+    /// Reusable scan-receive dialog. Lands a stock-in **and** creates
+    /// a fresh PartStorageLocation row representing the physical
+    /// container that arrived (a reel, a cut-tape strip, ...). Per
+    /// receipt = per row, so three reels of the same part land as
+    /// three distinct rows in the part's Locations tab.
+    ///
+    /// `opts`:
+    ///   part:          { id, name }                    required
+    ///   quantity:      number                          required, editable in dialog
+    ///   distributor:   { id, name } | null             optional, attribution
+    ///   sales_order_number: string | null              optional, attribution
+    ///   lot_number:    string | null                   from "1T" data identifier
+    ///   date_code:     string | null                   from "9D" data identifier
+    ///   default_form:  one of SCAN_FORM_OPTIONS ids    default "Reel"
+    function openScanReceiveDialog(opts) {
+        const winId = "pk-scan-receive";
+        if ($$(winId)) { $$(winId).destructor(); }
+        const part = opts.part;
+        const dist = opts.distributor;
+
+        // Storage locations from cache. Operator picks where the
+        // container goes; the part's existing storage_location_id (if
+        // any) makes the most-likely default.
+        const storageOptions = (lookupsCache && lookupsCache.storage_locations || [])
+            .map((s) => ({ id: s.id, value: s.name }));
+
+        const distLine = dist
+            ? `<div style="color:#6a7a8a;font-size:12px">From <b>${escapeHtml(dist.name)}</b>` +
+              (opts.sales_order_number ? ` SO #${escapeHtml(opts.sales_order_number)}` : "") + `</div>`
+            : "";
+
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 480,
+            head: "Receive scanned line",
+            body: {
+                view: "form",
+                id: "pk-scan-receive-form",
+                elements: [
+                    {
+                        view: "template",
+                        height: 50,
+                        borderless: true,
+                        template:
+                            `<div style="padding:6px 4px">` +
+                            `<div style="font-size:15px"><b>${escapeHtml(part.name || "")}</b></div>` +
+                            distLine +
+                            `</div>`,
+                    },
+                    { view: "counter", name: "quantity", label: "Quantity", labelWidth: 130,
+                      min: 1, step: 1, value: opts.quantity || 1 },
+                    { view: "richselect", name: "form", label: "Form", labelWidth: 130,
+                      options: SCAN_FORM_OPTIONS, value: opts.default_form || "Reel" },
+                    { view: "richselect", name: "storage_location_id", label: "Storage", labelWidth: 130,
+                      options: storageOptions,
+                      value: storageOptions.length ? storageOptions[0].id : null },
+                    { view: "text", name: "lot_number", label: "Lot", labelWidth: 130,
+                      value: opts.lot_number || "" },
+                    { view: "text", name: "date_code", label: "Date code", labelWidth: 130,
+                      value: opts.date_code || "" },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100,
+                              click: () => $$(winId) && $$(winId).destructor() },
+                            { view: "button", value: "✓ Add stock",
+                              css: "pk-btn-add", width: 140, hotkey: "enter",
+                              click: () => doSubmit() },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        async function doSubmit() {
+            const v = $$("pk-scan-receive-form").getValues();
+            const qty = parseInt(v.quantity, 10);
+            if (!Number.isFinite(qty) || qty <= 0) {
+                webix.message({ type: "error", text: "Quantity must be > 0." });
+                return;
+            }
+            if (!v.storage_location_id) {
+                webix.message({ type: "error", text: "Pick a storage location." });
+                return;
+            }
+            const body = {
+                stock_level: qty,
+                comment: opts.sales_order_number && dist
+                    ? `${dist.name} SO #${opts.sales_order_number} (scanned)`
+                    : "Barcode scan",
+                correction: false,
+                create_storage_row: true,
+                form: v.form || "Reel",
+                storage_location_id: parseInt(v.storage_location_id, 10),
+                lot_number: (v.lot_number || "").trim() || null,
+                date_code: (v.date_code || "").trim() || null,
+            };
+            if (dist && opts.sales_order_number) {
+                body.distributor_id = dist.id;
+                body.sales_order_number = opts.sales_order_number;
+            }
+            try {
+                await api.addStockEntry(part.id, body);
+                $$(winId) && $$(winId).destructor();
+                await loadPartDetail(part.id);
+                webix.message({ type: "success", text: `+${qty} stocked` });
+            } catch (e) {
+                webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
+            }
+        }
+    }
+
     /// Module-scoped "last scanned part" memory: set whenever
     /// handleScan navigates to a part. A subsequent pure-numeric
     /// scan within PENDING_TTL_MS is treated as a quantity for
@@ -1115,23 +1243,14 @@
             if (pending) {
                 const qty = parseInt(value, 10);
                 if (qty > 0) {
-                    webix.confirm({
-                        title: "Receive scanned quantity",
-                        text: `Add <b>+${qty}</b> to <b>${escapeHtml(pending.name)}</b>?`,
-                        ok: "Add stock", cancel: "Skip",
-                    }).then(async (yes) => {
-                        if (!yes) return;
-                        try {
-                            await api.addStockEntry(pending.id, {
-                                stock_level: qty,
-                                comment: "Barcode scan (qty pair)",
-                                correction: false,
-                            });
-                            await loadPartDetail(pending.id);
-                            webix.message({ type: "success", text: `+${qty} stocked` });
-                        } catch (e) {
-                            webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
-                        }
+                    openScanReceiveDialog({
+                        part: pending,
+                        quantity: qty,
+                        distributor: null,           // mfr-only barcode pair, no SO
+                        sales_order_number: null,
+                        lot_number: null,
+                        date_code: null,
+                        default_form: "Reel",        // most likely on a reel
                     });
                     return;
                 }
@@ -1303,32 +1422,17 @@
             } catch (_) {}
 
             if (fields.quantity && fields.quantity > 0) {
-                const distLabel = distributor ? distributor.name : "Distributor";
-                const tag = so ? ` from ${distLabel} SO #${so}` : "";
-                webix.confirm({
-                    title: "Receive scanned line",
-                    text: `Add <b>+${fields.quantity}</b> to <b>${escapeHtml(matched.name || "")}</b>${tag}?`,
-                    ok: "Add stock", cancel: "Skip",
-                }).then(async (yes) => {
-                    if (!yes) return;
-                    try {
-                        const body = {
-                            stock_level: fields.quantity,
-                            comment: so
-                                ? `${distLabel} SO #${so} (scanned)`
-                                : "Barcode scan",
-                            correction: false,
-                        };
-                        if (so && distributor) {
-                            body.distributor_id = distributor.id;
-                            body.sales_order_number = so;
-                        }
-                        await api.addStockEntry(matched.id, body);
-                        await loadPartDetail(matched.id);
-                        webix.message({ type: "success", text: `+${fields.quantity} stocked` });
-                    } catch (e) {
-                        webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
-                    }
+                openScanReceiveDialog({
+                    part: matched,
+                    quantity: fields.quantity,
+                    distributor: distributor,         // null if SKU didn't match a distributor row
+                    sales_order_number: so || null,
+                    lot_number: fields.lot_code || null,
+                    date_code: fields.date_code || null,
+                    // PackList2D codes carry SO# + qty → packing slip
+                    // line; the physical container is *probably* a
+                    // reel but operator can flip to CutTape/Loose.
+                    default_form: "Reel",
                 });
             } else {
                 const bits = [];
@@ -1379,32 +1483,17 @@
             onImported: async (resp) => {
                 try { await loadParts({ search: "" }); } catch (_) {}
                 if (fields.quantity && fields.quantity > 0 && resp && resp.part_id) {
-                    webix.confirm({
-                        title: "Receive scanned line",
-                        text: `Imported. Add <b>+${fields.quantity}</b> from ${sourceLabel} SO #${so || "?"}?`,
-                        ok: "Add stock", cancel: "Skip",
-                    }).then(async (yes) => {
-                        if (!yes) return;
-                        try {
-                            const body = {
-                                stock_level: fields.quantity,
-                                comment: so ? `${sourceLabel} SO #${so} (scanned)` : "Barcode scan",
-                                correction: false,
-                            };
-                            if (so) {
-                                // Look up the distributor that the import
-                                // just created/used (matches inferredSource).
-                                const distName = sourceLabel.toLowerCase();
-                                const dist = (lookupsCache && lookupsCache.distributors || [])
-                                    .find((d) => (d.name || "").toLowerCase() === distName);
-                                if (dist) { body.distributor_id = dist.id; body.sales_order_number = so; }
-                            }
-                            await api.addStockEntry(resp.part_id, body);
-                            await loadPartDetail(resp.part_id);
-                            webix.message({ type: "success", text: `+${fields.quantity} stocked` });
-                        } catch (e) {
-                            webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
-                        }
+                    const distName = sourceLabel.toLowerCase();
+                    const dist = (lookupsCache && lookupsCache.distributors || [])
+                        .find((d) => (d.name || "").toLowerCase() === distName);
+                    openScanReceiveDialog({
+                        part: { id: resp.part_id, name: mpn || sku },
+                        quantity: fields.quantity,
+                        distributor: dist || null,
+                        sales_order_number: so || null,
+                        lot_number: fields.lot_code || null,
+                        date_code: fields.date_code || null,
+                        default_form: "Reel",
                     });
                 }
             },

@@ -41,6 +41,24 @@ pub struct StockChange {
     pub distributor_id: Option<i32>,
     #[serde(default)]
     pub sales_order_number: Option<String>,
+    /// Slice 13b follow-on: track *which physical container* this
+    /// stock came in. Set `create_storage_row=true` to insert a
+    /// `PartStorageLocation` row in the same transaction as the
+    /// StockEntry. `form` is the ENUM (Reel/CutTape/Loose/Tray/...
+    /// see PartStorageLocation schema), `storage_location_id` is
+    /// where the container lives, and lot/date come straight off the
+    /// scanned 2D barcode if available. Per-receipt = per row, so
+    /// three scans of three reels land as three distinct rows.
+    #[serde(default)]
+    pub create_storage_row: bool,
+    #[serde(default)]
+    pub form: Option<String>,
+    #[serde(default)]
+    pub storage_location_id: Option<i32>,
+    #[serde(default)]
+    pub lot_number: Option<String>,
+    #[serde(default)]
+    pub date_code: Option<String>,
 }
 
 pub async fn create_stock_entry(
@@ -75,6 +93,46 @@ pub async fn create_stock_entry(
         attribution,
     )
     .await?;
+
+    // Optional: insert a PartStorageLocation row representing this
+    // physical container (a fresh reel, a cut-tape strip, a tube,
+    // ...). Only on positive deltas (a "received" event). Form must
+    // be one of the ENUM values; default Loose if missing.
+    if req.create_storage_row && req.stock_level > 0 {
+        let storage_location_id = req.storage_location_id
+            .ok_or(AppError::BadRequest(
+                "storage_location_id is required when create_storage_row=true",
+            ))?;
+        let form = req.form.as_deref().unwrap_or("Loose");
+        // Build the row's comment from lot/date + operator note, since
+        // the schema has no dedicated date_code column. Lives on the
+        // PartStorageLocation row for traceability ("which reel was
+        // this from?").
+        let mut bits: Vec<String> = Vec::new();
+        if let Some(d) = req.date_code.as_deref().filter(|s| !s.trim().is_empty()) {
+            bits.push(format!("date {}", d));
+        }
+        if let Some(c) = req.comment.as_deref().filter(|s| !s.trim().is_empty()) {
+            bits.push(c.to_string());
+        }
+        let comment_str = bits.join(" · ");
+        sqlx::query(
+            "INSERT INTO PartStorageLocation \
+                (part_id, storageLocation_id, form, quantity, lotNumber, comment, \
+                 user_id, created, lastModified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+        )
+        .bind(part_id)
+        .bind(storage_location_id)
+        .bind(form)
+        .bind(req.stock_level)
+        .bind(req.lot_number.as_deref())
+        .bind(if comment_str.is_empty() { None } else { Some(comment_str.as_str()) })
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
         .bind(part_id)
         .fetch_one(&mut *tx)
