@@ -5749,6 +5749,35 @@
                 labelWidth: 150,
                 value: currentPart.average_price || "",
             });
+            // Optional distributor + SO# attribution. Populates the
+            // structured StockEntry.(distributor_id, salesOrderNumber)
+            // columns so this receipt shows up in the part's Receipts
+            // tab. Universally useful — Mouser, Newark, Arrow, surplus,
+            // any vendor without an API integration.
+            const distOptions = [{ id: 0, value: "— none —" }].concat(
+                ((lookupsCache && lookupsCache.distributors) || [])
+                    .map((d) => ({ id: d.id, value: d.name }))
+            );
+            // Default: when the part has exactly one PartDistributor
+            // row, preselect that distributor — most-likely guess.
+            const defaultDistId = (currentPart.distributors && currentPart.distributors.length === 1)
+                ? currentPart.distributors[0].distributor_id : 0;
+            elements.push({
+                view: "richselect",
+                id: "pk-stock-dist",
+                label: "Distributor",
+                labelWidth: 150,
+                value: defaultDistId,
+                options: distOptions,
+            });
+            elements.push({
+                view: "text",
+                id: "pk-stock-so",
+                label: "Sales order #",
+                labelWidth: 150,
+                value: "",
+                placeholder: "Optional. Enables Receipts tracking.",
+            });
         }
 
         elements.push({
@@ -5825,6 +5854,18 @@
             if (mode === "add") {
                 const price = $$("pk-stock-price").getValue();
                 if (price && parseFloat(price) >= 0) body.price = price;
+                const dist = parseInt($$("pk-stock-dist").getValue(), 10);
+                const so = ($$("pk-stock-so").getValue() || "").trim();
+                if (dist && so) {
+                    body.distributor_id = dist;
+                    body.sales_order_number = so;
+                } else if (dist || so) {
+                    // Operator gave one but not the other — silently drop.
+                    // Both are needed to populate the structured tracking;
+                    // otherwise it'd half-attribute and confuse the
+                    // Receipts aggregation. Comment field is still free
+                    // for ad-hoc notes.
+                }
             }
         }
 

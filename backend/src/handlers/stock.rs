@@ -31,6 +31,16 @@ pub struct StockChange {
     /// add/remove. Doesn't affect math, only the history flag.
     #[serde(default)]
     pub correction: bool,
+    /// Optional distributor attribution — when set together with
+    /// `sales_order_number`, populates the structured StockEntry
+    /// columns the Receipts panel aggregates. Frontend only sends
+    /// both or neither. Universally useful: Mouser, Newark, Arrow,
+    /// surplus — any vendor without an API integration can still
+    /// flow into the per-order receipt history this way.
+    #[serde(default)]
+    pub distributor_id: Option<i32>,
+    #[serde(default)]
+    pub sales_order_number: Option<String>,
 }
 
 pub async fn create_stock_entry(
@@ -43,6 +53,16 @@ pub async fn create_stock_entry(
         return Err(AppError::BadRequest("stock_level cannot be zero"));
     }
 
+    // Only carry attribution when both fields are set — half-attributed
+    // rows would confuse the Receipts aggregation.
+    let attribution = match (req.distributor_id, req.sales_order_number.as_deref()) {
+        (Some(did), Some(so)) if did > 0 && !so.trim().is_empty() => OrderAttribution {
+            distributor_id: Some(did),
+            sales_order_number: Some(so.trim()),
+        },
+        _ => OrderAttribution::default(),
+    };
+
     let mut tx = pool.begin().await?;
     apply_stock_change_in_tx(
         &mut tx,
@@ -52,7 +72,7 @@ pub async fn create_stock_entry(
         req.comment.as_deref(),
         req.correction,
         user.user_id,
-        OrderAttribution::default(),
+        attribution,
     )
     .await?;
     let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
