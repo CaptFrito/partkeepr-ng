@@ -5907,7 +5907,14 @@
     // so a Webix combo can render it linearly while still showing the path.
     function flattenCategoryTree(tree) {
         const out = [];
-        function walk(nodes, indent) {
+        // Webix's richselect renders the `value` string through an HTML
+        // template that collapses runs of regular whitespace, so a
+        // plain "  " prefix is invisible in the dropdown. Use a
+        // non-breaking space (U+00A0) — HTML preserves it — to make
+        // depth visible. Four NBSPs per level reads cleanly without
+        // pushing deep entries off the right edge.
+        const INDENT_UNIT = "    ";
+        function walk(nodes, depth) {
             // Sort siblings alphabetically (case-insensitive); preserves
             // hierarchy while making it easier to find a category by
             // name in long lists.
@@ -5915,9 +5922,9 @@
                 (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
             );
             for (const n of sorted) {
-                const prefix = "  ".repeat(indent);
+                const prefix = INDENT_UNIT.repeat(depth);
                 out.push({ id: n.id, value: prefix + n.name });
-                if (n.children && n.children.length) walk(n.children, indent + 1);
+                if (n.children && n.children.length) walk(n.children, depth + 1);
             }
         }
         walk(tree, 0);
