@@ -48,6 +48,10 @@ pub fn routes() -> Router<AppState> {
             patch(categories::move_node),
         )
         .route("/api/parts", get(parts::list).post(parts::create))
+        // Slice 13b: resolve a distributor SKU → matched part +
+        // distributor identity, used by the barcode-scan dispatch
+        // for correct attribution on the StockEntry.
+        .route("/api/parts/by_distributor_sku", get(parts::by_distributor_sku))
         .route(
             "/api/parts/:id",
             get(parts::detail).put(parts::update).delete(parts::delete),

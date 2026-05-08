@@ -485,6 +485,11 @@
             if (!r.ok) throw new Error(`part-runs failed: ${r.status}`);
             return r.json();
         },
+        async partByDistributorSku(sku) {
+            const r = await fetch(`/api/parts/by_distributor_sku?sku=${encodeURIComponent(sku)}`);
+            if (!r.ok) throw new Error(`sku lookup failed: ${r.status}`);
+            return r.json();  // SkuLookupHit | null
+        },
         async partReceipts(partId) {
             const r = await fetch(`/api/parts/${partId}/stock-receipts`);
             if (!r.ok) throw new Error(`part-receipts failed: ${r.status}`);
@@ -1173,12 +1178,29 @@
         const mpn = (fields.mpn || "").trim();
         const so  = (fields.sales_order_number || fields.customer_po || "").trim();
 
-        // Local match: SKU first (distributor-qualified), MPN fallback.
+        // Resolve distributor + part from the SKU directly. This nails
+        // attribution: a Mouser scan tags the StockEntry as Mouser, a
+        // Digi-Key scan as Digi-Key, etc., without guessing from
+        // SKU-prefix patterns.
         let matched = null;
-        for (const probe of [sku, mpn]) {
-            if (!probe) continue;
-            const resp = await api.parts({ search: probe, limit: 5 });
-            if (resp.items && resp.items.length) { matched = resp.items[0]; break; }
+        let distributor = null;  // { id, name } when SKU matched a PartDistributor row
+        if (sku) {
+            try {
+                const hit = await api.partByDistributorSku(sku);
+                if (hit) {
+                    matched = { id: hit.part_id, name: hit.part_name, stock_level: hit.stock_level };
+                    distributor = { id: hit.distributor_id, name: hit.distributor_name };
+                }
+            } catch (e) { console.warn("sku lookup failed:", e); }
+        }
+        // Fallback: free-form search by SKU then MPN (catches matches
+        // where the part has the MPN but no PartDistributor row yet).
+        if (!matched) {
+            for (const probe of [sku, mpn]) {
+                if (!probe) continue;
+                const resp = await api.parts({ search: probe, limit: 5 });
+                if (resp.items && resp.items.length) { matched = resp.items[0]; break; }
+            }
         }
 
         if (matched) {
@@ -1195,7 +1217,8 @@
             } catch (_) {}
 
             if (fields.quantity && fields.quantity > 0) {
-                const tag = so ? ` from SO #${so}` : "";
+                const distLabel = distributor ? distributor.name : "Distributor";
+                const tag = so ? ` from ${distLabel} SO #${so}` : "";
                 webix.confirm({
                     title: "Receive scanned line",
                     text: `Add <b>+${fields.quantity}</b> to <b>${escapeHtml(matched.name || "")}</b>${tag}?`,
@@ -1205,13 +1228,14 @@
                     try {
                         const body = {
                             stock_level: fields.quantity,
-                            comment: so ? `Digi-Key SO #${so} (scanned)` : "Barcode scan",
+                            comment: so
+                                ? `${distLabel} SO #${so} (scanned)`
+                                : "Barcode scan",
                             correction: false,
                         };
-                        if (so) {
-                            const dk = (lookupsCache && lookupsCache.distributors || [])
-                                .find((d) => (d.name || "").toLowerCase() === "digi-key");
-                            if (dk) { body.distributor_id = dk.id; body.sales_order_number = so; }
+                        if (so && distributor) {
+                            body.distributor_id = distributor.id;
+                            body.sales_order_number = so;
                         }
                         await api.addStockEntry(matched.id, body);
                         await loadPartDetail(matched.id);

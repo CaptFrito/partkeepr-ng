@@ -601,6 +601,53 @@ pub struct PartDetail {
 
 const STOCK_ENTRY_LIMIT: i64 = 50;
 
+#[derive(Debug, Deserialize)]
+pub struct SkuLookupQuery {
+    pub sku: String,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct SkuLookupHit {
+    pub part_id: i32,
+    pub part_name: String,
+    pub stock_level: i32,
+    pub distributor_id: i32,
+    pub distributor_name: String,
+}
+
+/// Resolve a distributor SKU to the matching Part + Distributor.
+/// Used by the barcode scan dispatch (slice 13b) so the StockEntry
+/// attribution lands on the right distributor — Mouser scans get
+/// the Mouser distributor_id, Digi-Key scans get Digi-Key, etc.,
+/// all from the SKU alone (rather than guessing from prefix
+/// patterns).
+///
+/// Exact match on `PartDistributor.orderNumber` (case-sensitive —
+/// distributor SKUs are typed exactly as printed). First hit wins;
+/// in practice each SKU is unique within a distributor's catalog.
+pub async fn by_distributor_sku(
+    State(pool): State<MySqlPool>,
+    Query(q): Query<SkuLookupQuery>,
+) -> Result<Json<Option<SkuLookupHit>>, AppError> {
+    let sku = q.sku.trim();
+    if sku.is_empty() {
+        return Err(AppError::BadRequest("sku is required"));
+    }
+    let row: Option<SkuLookupHit> = sqlx::query_as(
+        "SELECT p.id AS part_id, p.name AS part_name, p.stockLevel AS stock_level, \
+                d.id AS distributor_id, d.name AS distributor_name \
+         FROM PartDistributor pd \
+         JOIN Distributor d ON d.id = pd.distributor_id \
+         JOIN Part p        ON p.id = pd.part_id \
+         WHERE pd.orderNumber = ? \
+         ORDER BY p.id LIMIT 1",
+    )
+    .bind(sku)
+    .fetch_optional(&pool)
+    .await?;
+    Ok(Json(row))
+}
+
 pub async fn detail(
     State(pool): State<MySqlPool>,
     Path(id): Path<i32>,
