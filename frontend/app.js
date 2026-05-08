@@ -1168,15 +1168,20 @@
         }
     }
 
-    /// Infer which distributor a scanned barcode comes from, by SKU
-    /// shape. Digi-Key SKUs end with "-ND" (or "/N" on some legacy
-    /// catalogs). Mouser SKUs start with a numeric prefix + hyphen
-    /// (e.g., "579-24FC64T-I/SN", "617-21348000380010"). Returns null
-    /// when neither pattern matches; caller falls back to the
-    /// active-source default.
-    function inferSourceFromSku(sku) {
+    /// Infer which distributor a scanned barcode comes from. The two
+    /// signals we use:
+    ///  - Canonical DK SKU suffix is "-ND". If P ends in "-ND" → DK.
+    ///  - Mouser per-reel labels put the MPN in the P field (no Mouser
+    ///    SKU on reel labels — only on packing slips). So when P
+    ///    equals 1P, or starts with a "<digits>-" prefix, classify
+    ///    as Mouser.
+    ///  - Otherwise null and the dialog falls back to the user's
+    ///    last-used source.
+    /// `sku` is the value of the `P` data identifier; `mpn` is `1P`.
+    function inferSourceFromSku(sku, mpn) {
         if (!sku) return null;
-        if (/-ND$/.test(sku) || /\/N$/.test(sku)) return "digikey";
+        if (/-ND$/.test(sku)) return "digikey";
+        if (mpn && sku === mpn) return "mouser";
         if (/^\d{2,4}-/.test(sku)) return "mouser";
         return null;
     }
@@ -1279,16 +1284,30 @@
         // with the right distributor pre-selected — otherwise a
         // Mouser scan would import through the Digi-Key search and
         // mis-attribute the PartDistributor row.
-        const inferredSource = inferSourceFromSku(sku) || "digikey";
+        // SKU-pattern inference, with last-used source as fallback so
+        // ambiguous scans honor the operator's recent context.
+        const lastSourceKey = `pk:lookup:last-source:${currentUser ? currentUser.username : "anon"}`;
+        const lastUsed = localStorage.getItem(lastSourceKey);
+        const inferredSource = inferSourceFromSku(sku, mpn)
+            || (lastUsed === "mouser" || lastUsed === "digikey" ? lastUsed : "digikey");
         const sourceLabel = inferredSource === "mouser" ? "Mouser" : "Digi-Key";
         webix.message({
             type: "info",
             text: `Scanned ${sku || mpn} — not in inventory yet, opening ${sourceLabel} import dialog.`,
         });
+        // Force the distributor SKU into the imported PartDistributor
+        // row only when P is *demonstrably* a distributor SKU — not
+        // when it's just the MPN (Mouser reel labels put the MPN in P
+        // and don't carry a Mouser SKU). Otherwise the search result's
+        // own SKU value lands correctly via the normal import path.
+        const skuLooksLikeSku = sku && sku !== mpn
+            && (/-ND$/.test(sku) || /^\d{2,4}-/.test(sku));
+        const forceSku = skuLooksLikeSku ? sku : "";
+
         openLookupSearchDialog({
             prefillSource: inferredSource,
             prefillMpn: mpn || sku,
-            forceDistributorPn: sku,
+            forceDistributorPn: forceSku,
             onImported: async (resp) => {
                 try { await loadParts({ search: "" }); } catch (_) {}
                 if (fields.quantity && fields.quantity > 0 && resp && resp.part_id) {
