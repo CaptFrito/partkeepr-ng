@@ -1168,6 +1168,19 @@
         }
     }
 
+    /// Infer which distributor a scanned barcode comes from, by SKU
+    /// shape. Digi-Key SKUs end with "-ND" (or "/N" on some legacy
+    /// catalogs). Mouser SKUs start with a numeric prefix + hyphen
+    /// (e.g., "579-24FC64T-I/SN", "617-21348000380010"). Returns null
+    /// when neither pattern matches; caller falls back to the
+    /// active-source default.
+    function inferSourceFromSku(sku) {
+        if (!sku) return null;
+        if (/-ND$/.test(sku) || /\/N$/.test(sku)) return "digikey";
+        if (/^\d{2,4}-/.test(sku)) return "mouser";
+        return null;
+    }
+
     /// Dispatch a locally-parsed ANSI MH10.8.2 barcode (the output of
     /// parseAnsiBarcode). Uses the parts search endpoint (which now
     /// LIKE-matches PartDistributor.orderNumber + PartManufacturer.partNumber)
@@ -1262,12 +1275,18 @@
             webix.message({ type: "error", text: "Barcode parsed but no MPN/SKU recognized." });
             return;
         }
+        // Infer source from SKU pattern so the import dialog opens
+        // with the right distributor pre-selected — otherwise a
+        // Mouser scan would import through the Digi-Key search and
+        // mis-attribute the PartDistributor row.
+        const inferredSource = inferSourceFromSku(sku) || "digikey";
+        const sourceLabel = inferredSource === "mouser" ? "Mouser" : "Digi-Key";
         webix.message({
             type: "info",
-            text: `Scanned ${sku || mpn} — not in inventory yet, opening import dialog.`,
+            text: `Scanned ${sku || mpn} — not in inventory yet, opening ${sourceLabel} import dialog.`,
         });
         openLookupSearchDialog({
-            prefillSource: "digikey",
+            prefillSource: inferredSource,
             prefillMpn: mpn || sku,
             forceDistributorPn: sku,
             onImported: async (resp) => {
@@ -1275,20 +1294,23 @@
                 if (fields.quantity && fields.quantity > 0 && resp && resp.part_id) {
                     webix.confirm({
                         title: "Receive scanned line",
-                        text: `Imported. Add <b>+${fields.quantity}</b> from SO #${so || "?"}?`,
+                        text: `Imported. Add <b>+${fields.quantity}</b> from ${sourceLabel} SO #${so || "?"}?`,
                         ok: "Add stock", cancel: "Skip",
                     }).then(async (yes) => {
                         if (!yes) return;
                         try {
                             const body = {
                                 stock_level: fields.quantity,
-                                comment: so ? `Digi-Key SO #${so} (scanned)` : "Barcode scan",
+                                comment: so ? `${sourceLabel} SO #${so} (scanned)` : "Barcode scan",
                                 correction: false,
                             };
                             if (so) {
-                                const dk = (lookupsCache && lookupsCache.distributors || [])
-                                    .find((d) => (d.name || "").toLowerCase() === "digi-key");
-                                if (dk) { body.distributor_id = dk.id; body.sales_order_number = so; }
+                                // Look up the distributor that the import
+                                // just created/used (matches inferredSource).
+                                const distName = sourceLabel.toLowerCase();
+                                const dist = (lookupsCache && lookupsCache.distributors || [])
+                                    .find((d) => (d.name || "").toLowerCase() === distName);
+                                if (dist) { body.distributor_id = dist.id; body.sales_order_number = so; }
                             }
                             await api.addStockEntry(resp.part_id, body);
                             await loadPartDetail(resp.part_id);
