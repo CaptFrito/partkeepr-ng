@@ -258,4 +258,8 @@ pub fn routes() -> Router<AppState> {
         // Slice 12b.2 — Digi-Key Order Status receive flow.
         .route("/api/lookup/digikey/order-status", post(digikey::order_status))
         .route("/api/lookup/digikey/order-receive", post(digikey::order_receive))
+        // Slice 12a.2 — Mouser Order History receive flow (parallel
+        // shapes; one frontend dialog drives both).
+        .route("/api/lookup/mouser/order-status", post(mouser::order_status))
+        .route("/api/lookup/mouser/order-receive", post(mouser::order_receive))
 }

@@ -78,6 +78,10 @@ pub struct CapabilitiesResponse {
 #[derive(Debug, Serialize)]
 pub struct SourceCaps {
     pub available: bool,
+    /// Order Status / receive flow available — independent of search.
+    /// Digi-Key: bound to the same OAuth credentials. Mouser: separate
+    /// API key (PARTKEEPR_MOUSER_ORDER_KEY).
+    pub order_status_available: bool,
     pub calls_per_minute: u32,
     pub calls_per_day: u32,
 }
@@ -89,15 +93,94 @@ pub async fn capabilities(
     Json(CapabilitiesResponse {
         mouser: Some(SourceCaps {
             available: mouser.search_key.is_some(),
+            order_status_available: mouser.order_key.is_some(),
             calls_per_minute: 30,
             calls_per_day: 1000,
         }),
         digikey: Some(SourceCaps {
             available: digikey.available(),
+            // Digi-Key uses the same OAuth token for search + order
+            // status; if the app is configured at all, both are live.
+            order_status_available: digikey.available(),
             calls_per_minute: 60, // Digi-Key historical: ~1/sec.
             calls_per_day: 1000,
         }),
     })
+}
+
+// ===========================================================================
+//  Order receive — shared shapes
+//
+//  Both Digi-Key (slice 12b.2) and Mouser (slice 12a.2) implement the
+//  same operator workflow: enter SO# → preview line items joined
+//  against PartDistributor → apply matched lines as StockEntry
+//  inserts. The wire shapes differ between sources; the *frontend-
+//  facing* shapes are unified here so one dialog handles both.
+// ===========================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct OrderStatusRequest {
+    pub order_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderStatusResponse {
+    pub sales_order_id: i64,
+    pub currency: String,
+    pub lines: Vec<OrderStatusLine>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderStatusLine {
+    pub line_number: String,
+    /// Distributor SKU. For Digi-Key this is the DK part #;
+    /// for Mouser it's the Mouser part #. Field name is historical
+    /// (DK shipped first); the frontend treats it as a generic
+    /// "distributor SKU" string.
+    pub digikey_pn: String,
+    pub mpn: String,
+    pub manufacturer: String,
+    pub description: String,
+    pub customer_reference: String,
+    pub quantity_ordered: i32,
+    pub quantity_shipped: i32,
+    pub quantity_backorder: i32,
+    pub unit_price: f64,
+    /// Local-DB match. None if no PartDistributor row matches the
+    /// (distributor, sku) pair.
+    pub part_id: Option<i32>,
+    pub part_name: Option<String>,
+    pub current_stock: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OrderReceiveRequest {
+    pub order_id: i64,
+    pub lines: Vec<OrderReceiveLine>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OrderReceiveLine {
+    pub part_id: i32,
+    pub quantity: i32,
+    /// Per-piece price. None → no cost basis recorded for this entry.
+    pub price: Option<rust_decimal::Decimal>,
+    /// Override the default comment ("<Distributor> SO #{n} line {k}").
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderReceiveResponse {
+    pub applied: usize,
+    pub results: Vec<OrderReceiveResult>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderReceiveResult {
+    pub part_id: i32,
+    pub quantity: i32,
+    pub stock_after: i32,
+    pub low_stock: bool,
 }
 
 // ===========================================================================

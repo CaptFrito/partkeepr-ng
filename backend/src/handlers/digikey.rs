@@ -629,39 +629,16 @@ async fn fetch_order_status(
 }
 
 // ----- Preview endpoint -----------------------------------------------------
+//
+// `OrderStatusRequest` / `OrderStatusResponse` / `OrderStatusLine`
+// + `OrderReceive*` types live in `lookup.rs` so the Mouser handler
+// (`mouser::order_status`) can map onto the same shape and the
+// frontend stays source-agnostic.
 
-#[derive(Debug, Deserialize)]
-pub struct OrderStatusRequest {
-    pub order_id: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderStatusResponse {
-    pub sales_order_id: i64,
-    pub currency: String,
-    pub lines: Vec<OrderStatusLine>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderStatusLine {
-    pub line_number: String,
-    pub digikey_pn: String,
-    pub mpn: String,
-    pub manufacturer: String,
-    pub description: String,
-    pub customer_reference: String,
-    pub quantity_ordered: i32,
-    pub quantity_shipped: i32,
-    pub quantity_backorder: i32,
-    pub unit_price: f64,
-    /// Local-DB match. None if no PartDistributor row matches the
-    /// (Digi-Key, digikey_pn) pair. Operator can still receive the
-    /// line by manually picking a part — but most flows go: missing
-    /// match → operator opens lookup-import dialog → re-fetches.
-    pub part_id: Option<i32>,
-    pub part_name: Option<String>,
-    pub current_stock: Option<i32>,
-}
+use crate::handlers::lookup::{
+    OrderStatusRequest, OrderStatusResponse, OrderStatusLine,
+    OrderReceiveRequest, OrderReceiveResponse, OrderReceiveResult,
+};
 
 pub async fn order_status(
     State(pool): State<MySqlPool>,
@@ -732,36 +709,6 @@ pub async fn order_status(
 }
 
 // ----- Receive endpoint -----------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-pub struct OrderReceiveRequest {
-    pub order_id: i64,
-    pub lines: Vec<OrderReceiveLine>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct OrderReceiveLine {
-    pub part_id: i32,
-    pub quantity: i32,
-    /// Per-piece price. None → no cost basis recorded for this entry.
-    pub price: Option<rust_decimal::Decimal>,
-    /// Override the default comment ("Digi-Key SO #{n} line {k}").
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderReceiveResponse {
-    pub applied: usize,
-    pub results: Vec<OrderReceiveResult>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderReceiveResult {
-    pub part_id: i32,
-    pub quantity: i32,
-    pub stock_after: i32,
-    pub low_stock: bool,
-}
 
 pub async fn order_receive(
     State(pool): State<MySqlPool>,

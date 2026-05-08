@@ -31,6 +31,10 @@ const HTTP_TIMEOUT_SECS: u64 = 15;
 pub struct MouserConfig {
     /// Search API key (env: PARTKEEPR_MOUSER_SEARCH_KEY).
     pub search_key: Option<String>,
+    /// Order History / Cart / Order key (env: PARTKEEPR_MOUSER_ORDER_KEY).
+    /// Distinct from the Search key — Mouser issues two on the same
+    /// account; this one unlocks the four `/orderhistory/*` endpoints.
+    pub order_key: Option<String>,
 }
 
 impl MouserConfig {
@@ -38,12 +42,18 @@ impl MouserConfig {
         let search_key = std::env::var("PARTKEEPR_MOUSER_SEARCH_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty());
+        let order_key = std::env::var("PARTKEEPR_MOUSER_ORDER_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
         if search_key.is_some() {
             tracing::info!("mouser search api enabled");
         } else {
             tracing::info!("mouser search api disabled (set PARTKEEPR_MOUSER_SEARCH_KEY to enable)");
         }
-        Self { search_key }
+        if order_key.is_some() {
+            tracing::info!("mouser order history api enabled");
+        }
+        Self { search_key, order_key }
     }
 }
 
@@ -365,4 +375,274 @@ pub async fn import(
         },
     ).await?;
     Ok(Json(resp))
+}
+
+// ===========================================================================
+//  Slice 12a.2 — Mouser Order History receive flow
+//
+//  Endpoints (path: /api/v1/orderhistory/...):
+//   - salesOrderNumber?apiKey&salesOrderNumber  → per-order line items
+//   - webOrderNumber?apiKey&webOrderNumber      → same shape, web-order #
+//   - ByDateRange?apiKey&startDate&endDate      → list of order summaries
+//   - ByDateFilter?apiKey&dateFilter            → preset windows
+//
+//  Wire format taken from Mouser's live swagger doc — fields are
+//  PascalCase (consistent with their Search API). Per-line shape:
+//    OrderLines[].{ Quantity, UnitPrice, ExtPrice, FormattedUnitPrice,
+//                   FormattedExtendedPrice,
+//                   ProductInfo.{ MouserPartNumber, CustomerPartNumber,
+//                                 ManufacturerName, ManufacturerPartNumber,
+//                                 PartDescription },
+//                   AdditionalFees[], Activities[] }
+//
+//  We map onto the same `OrderStatusResponse`/`OrderStatusLine` /
+//  `OrderReceive*` shapes the Digi-Key flow uses, so the frontend
+//  dialog can be source-agnostic.
+// ===========================================================================
+
+const MOUSER_ORDER_BASE: &str = "https://api.mouser.com/api/v1/orderhistory";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct MouserOrderDetailResponse {
+    #[serde(default)]
+    order_lines: Vec<MouserOrderLine>,
+    #[serde(default, deserialize_with = "null_to_empty_vec")]
+    errors: Vec<MouserOrderError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MouserOrderError {
+    #[serde(default, rename = "Message", deserialize_with = "null_to_empty_string")]
+    message: String,
+    #[allow(dead_code)]
+    #[serde(default, rename = "Code", deserialize_with = "null_to_empty_string")]
+    code: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct MouserOrderLine {
+    #[serde(default)]
+    quantity: i32,
+    #[serde(default)]
+    unit_price: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    ext_price: f64,
+    #[allow(dead_code)]
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    formatted_unit_price: String,
+    #[serde(default)]
+    product_info: MouserProductInfo,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct MouserProductInfo {
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    mouser_part_number: String,
+    #[allow(dead_code)]
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    customer_part_number: String,
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    manufacturer_name: String,
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    manufacturer_part_number: String,
+    #[serde(default, deserialize_with = "null_to_empty_string")]
+    part_description: String,
+}
+
+async fn fetch_order_detail(
+    cfg: &MouserConfig,
+    sales_order_number: &str,
+) -> Result<MouserOrderDetailResponse, AppError> {
+    let key = cfg.order_key.as_ref().ok_or_else(|| AppError::BadRequest(
+        "mouser order history not configured (set PARTKEEPR_MOUSER_ORDER_KEY)",
+    ))?;
+    let base = format!("{}/salesOrderNumber", MOUSER_ORDER_BASE);
+    let url = reqwest::Url::parse_with_params(&base, &[
+        ("salesOrderNumber", sales_order_number),
+        ("apiKey", key.as_str()),
+    ]).map_err(|e| AppError::Internal(format!("mouser order url: {e}")))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| AppError::Internal(format!("reqwest build: {e}")))?;
+    let resp = client.get(url)
+        .header("Accept", "application/json")
+        .send().await
+        .map_err(|e| AppError::Internal(format!("mouser order: {e}")))?;
+    let status = resp.status();
+    let text = resp.text().await
+        .map_err(|e| AppError::Internal(format!("mouser order body: {e}")))?;
+    if !status.is_success() {
+        return Err(AppError::Internal(format!(
+            "mouser order HTTP {status}: {}",
+            text.chars().take(400).collect::<String>()
+        )));
+    }
+    serde_json::from_str(&text).map_err(|e| AppError::Internal(format!(
+        "mouser order parse: {e}: {}",
+        text.chars().take(400).collect::<String>()
+    )))
+}
+
+// ----- Preview endpoint (mirrors Digi-Key's order_status shape) -----
+
+use crate::handlers::lookup::{
+    OrderStatusRequest as MouserOrderStatusRequest,
+    OrderStatusResponse as MouserOrderStatusResponse,
+    OrderStatusLine as MouserOrderStatusLine,
+    OrderReceiveRequest as MouserOrderReceiveRequest,
+    OrderReceiveResponse as MouserOrderReceiveResponse,
+    OrderReceiveResult as MouserOrderReceiveResult,
+};
+
+pub async fn order_status(
+    State(pool): State<MySqlPool>,
+    State(cfg): State<MouserConfig>,
+    Json(req): Json<MouserOrderStatusRequest>,
+) -> Result<Json<MouserOrderStatusResponse>, AppError> {
+    if cfg.order_key.is_none() {
+        return Err(AppError::BadRequest(
+            "mouser order history not configured (set PARTKEEPR_MOUSER_ORDER_KEY)",
+        ));
+    }
+    // The shared OrderStatusRequest carries `order_id: i64`; Mouser SO#s
+    // are also numeric in practice. Pass through as a string to the API.
+    if req.order_id <= 0 {
+        return Err(AppError::BadRequest("order_id must be > 0"));
+    }
+    let so_str = req.order_id.to_string();
+
+    let detail = fetch_order_detail(&cfg, &so_str).await?;
+
+    // Bubble any non-empty error messages — Mouser returns 200 with
+    // an Errors[] body for soft failures (key wrong scope, SO# not
+    // owned by account, etc.).
+    if let Some(err) = detail.errors.iter().find(|e| !e.message.trim().is_empty()) {
+        return Err(AppError::Internal(format!("mouser: {}", err.message)));
+    }
+
+    let mut lines: Vec<MouserOrderStatusLine> = Vec::with_capacity(detail.order_lines.len());
+    for (idx, ol) in detail.order_lines.iter().enumerate() {
+        let mouser_pn = ol.product_info.mouser_part_number.trim();
+        let (part_id, part_name, current_stock) = if mouser_pn.is_empty() {
+            (None, None, None)
+        } else {
+            let row: Option<(i32, String, i32)> = sqlx::query_as(
+                "SELECT p.id, p.name, p.stockLevel \
+                 FROM PartDistributor pd \
+                 JOIN Distributor d ON d.id = pd.distributor_id \
+                 JOIN Part p        ON p.id = pd.part_id \
+                 WHERE LOWER(d.name) = 'mouser' \
+                   AND pd.orderNumber = ? \
+                 ORDER BY p.id LIMIT 1",
+            )
+            .bind(mouser_pn)
+            .fetch_optional(&pool)
+            .await?;
+            match row {
+                Some((pid, name, stock)) => (Some(pid), Some(name), Some(stock)),
+                None => (None, None, None),
+            }
+        };
+
+        // Mouser's per-order endpoint returns `Quantity` (ordered),
+        // not a separate shipped count. The receive flow defaults
+        // `qty_shipped = quantity_ordered` since order-history rows
+        // typically reflect already-fulfilled orders, but the operator
+        // can edit per-line before applying.
+        lines.push(MouserOrderStatusLine {
+            line_number: format!("{}", idx + 1),
+            digikey_pn: mouser_pn.to_string(),  // shared field name; "Distributor SKU"
+            mpn: ol.product_info.manufacturer_part_number.clone(),
+            manufacturer: ol.product_info.manufacturer_name.clone(),
+            description: ol.product_info.part_description.clone(),
+            customer_reference: ol.product_info.customer_part_number.clone(),
+            quantity_ordered: ol.quantity,
+            quantity_shipped: ol.quantity, // assume fulfilled
+            quantity_backorder: 0,
+            unit_price: ol.unit_price,
+            part_id,
+            part_name,
+            current_stock,
+        });
+    }
+
+    Ok(Json(MouserOrderStatusResponse {
+        sales_order_id: req.order_id,
+        currency: "USD".to_string(), // Mouser order endpoint doesn't echo currency
+        lines,
+    }))
+}
+
+pub async fn order_receive(
+    State(pool): State<MySqlPool>,
+    axum::Extension(user): axum::Extension<crate::handlers::auth::CurrentUser>,
+    Json(req): Json<MouserOrderReceiveRequest>,
+) -> Result<Json<MouserOrderReceiveResponse>, AppError> {
+    if req.order_id <= 0 {
+        return Err(AppError::BadRequest("order_id must be > 0"));
+    }
+    if req.lines.is_empty() {
+        return Err(AppError::BadRequest("no lines to apply"));
+    }
+    for l in &req.lines {
+        if l.quantity <= 0 {
+            return Err(AppError::BadRequest("line quantity must be > 0"));
+        }
+    }
+
+    let mut tx = pool.begin().await?;
+    let mouser_id = match sqlx::query_as::<_, (i32,)>(
+        "SELECT id FROM Distributor WHERE LOWER(name) = 'mouser' LIMIT 1",
+    ).fetch_optional(&mut *tx).await? {
+        Some((id,)) => id,
+        None => {
+            let res = sqlx::query(
+                "INSERT INTO Distributor (name, url, enabledForReports) \
+                 VALUES ('Mouser', 'https://www.mouser.com', 1)",
+            ).execute(&mut *tx).await?;
+            res.last_insert_id() as i32
+        }
+    };
+    let so_str = req.order_id.to_string();
+
+    let mut results: Vec<MouserOrderReceiveResult> = Vec::with_capacity(req.lines.len());
+    for (idx, line) in req.lines.iter().enumerate() {
+        let default_comment = format!("Mouser SO #{} line {}", req.order_id, idx + 1);
+        let comment = line.comment.as_deref().filter(|s| !s.trim().is_empty())
+            .unwrap_or(&default_comment);
+        let (stock_after, low_stock) = crate::handlers::stock::apply_stock_change_in_tx(
+            &mut tx,
+            line.part_id,
+            line.quantity,
+            line.price,
+            Some(comment),
+            false,
+            user.user_id,
+            crate::handlers::stock::OrderAttribution {
+                distributor_id: Some(mouser_id),
+                sales_order_number: Some(&so_str),
+            },
+        ).await?;
+        results.push(MouserOrderReceiveResult {
+            part_id: line.part_id,
+            quantity: line.quantity,
+            stock_after,
+            low_stock,
+        });
+    }
+    tx.commit().await?;
+    tracing::info!(
+        order_id = req.order_id, applied = results.len(),
+        "mouser order received",
+    );
+
+    Ok(Json(MouserOrderReceiveResponse {
+        applied: results.len(),
+        results,
+    }))
 }

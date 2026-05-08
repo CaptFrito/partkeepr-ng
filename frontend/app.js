@@ -563,24 +563,24 @@
             if (!r.ok) throw new Error((data && data.error) || `${source} import failed: ${r.status}`);
             return data;
         },
-        async digikeyOrderStatus(orderId) {
-            const r = await fetch("/api/lookup/digikey/order-status", {
+        async lookupOrderStatus(source, orderId) {
+            const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/order-status`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ order_id: orderId }),
             });
             const data = await r.json().catch(() => null);
-            if (!r.ok) throw new Error((data && data.error) || `digikey order-status failed: ${r.status}`);
+            if (!r.ok) throw new Error((data && data.error) || `${source} order-status failed: ${r.status}`);
             return data;
         },
-        async digikeyOrderReceive(orderId, lines) {
-            const r = await fetch("/api/lookup/digikey/order-receive", {
+        async lookupOrderReceive(source, orderId, lines) {
+            const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/order-receive`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ order_id: orderId, lines }),
             });
             const data = await r.json().catch(() => null);
-            if (!r.ok) throw new Error((data && data.error) || `digikey order-receive failed: ${r.status}`);
+            if (!r.ok) throw new Error((data && data.error) || `${source} order-receive failed: ${r.status}`);
             return data;
         },
         async metaMatches(metaPartId) {
@@ -3363,7 +3363,16 @@
                             css: "pk-btn-add",
                             width: 175,
                             hidden: true,  // shown only when Digi-Key is configured
-                            click: () => openDigiKeyReceiveDialog(),
+                            click: () => openOrderReceiveDialog("digikey"),
+                        },
+                        {
+                            view: "button",
+                            id: "pk-mouser-receive-button",
+                            value: "📦 Receive Mouser Order",
+                            css: "pk-btn-add",
+                            width: 195,
+                            hidden: true,  // shown only when Mouser order key is set
+                            click: () => openOrderReceiveDialog("mouser"),
                         },
                         {
                             view: "button",
@@ -7444,8 +7453,14 @@
         }
         // 12b.2: Digi-Key Order Status receive button — only when DK is configured.
         const dkBtn = $$("pk-dk-receive-button");
-        if (dkBtn && lookupCapsCache && lookupCapsCache.digikey && lookupCapsCache.digikey.available) {
+        if (dkBtn && lookupCapsCache && lookupCapsCache.digikey && lookupCapsCache.digikey.order_status_available) {
             dkBtn.show();
+        }
+        // 12a.2: Mouser Order History receive button — only when the
+        // separate order key is set (PARTKEEPR_MOUSER_ORDER_KEY).
+        const mouserBtn = $$("pk-mouser-receive-button");
+        if (mouserBtn && lookupCapsCache && lookupCapsCache.mouser && lookupCapsCache.mouser.order_status_available) {
+            mouserBtn.show();
         }
     }
 
@@ -7785,16 +7800,21 @@
     //  the per-part history.
     // ============================================================
 
-    async function openDigiKeyReceiveDialog() {
+    /// Source-agnostic receive dialog. Both Digi-Key and Mouser hit
+    /// the same backend shapes (`OrderStatusResponse` / `OrderReceive*`),
+    /// just at different URL prefixes.
+    async function openOrderReceiveDialog(source) {
         const winId = "pk-dk-receive-dialog";
         if ($$(winId)) { $$(winId).destructor(); }
+
+        const sourceLabel = source === "mouser" ? "Mouser" : "Digi-Key";
 
         let preview = null;  // OrderStatusResponse from the last fetch
         let lineState = [];  // per-line: {apply: bool, quantity: int}
 
         const headTpl = (sid) => sid
-            ? `Receive Digi-Key Sales Order #${sid}`
-            : "Receive Digi-Key Sales Order";
+            ? `Receive ${sourceLabel} Sales Order #${sid}`
+            : `Receive ${sourceLabel} Sales Order`;
 
         webix.ui({
             view: "window",
@@ -7974,7 +7994,7 @@
             status.define("label", "Fetching…");
             status.refresh();
             try {
-                preview = await api.digikeyOrderStatus(oid);
+                preview = await api.lookupOrderStatus(source, oid);
             } catch (e) {
                 preview = null;
                 lineState = [];
@@ -8025,7 +8045,7 @@
                 return;
             }
             openLookupSearchDialog({
-                prefillSource: "digikey",
+                prefillSource: source,  // mouser → mouser; digikey → digikey
                 prefillMpn: mpn,
                 onImported: async () => {
                     // Refresh the parts grid so future stock-entries can land.
@@ -8062,7 +8082,7 @@
             const applyBtn = $$("pk-dk-rcv-apply");
             applyBtn.disable();
             try {
-                const resp = await api.digikeyOrderReceive(preview.sales_order_id, lines);
+                const resp = await api.lookupOrderReceive(source, preview.sales_order_id, lines);
                 webix.message({
                     type: "success",
                     text: `Stocked ${resp.applied} line${resp.applied === 1 ? "" : "s"} from SO #${preview.sales_order_id}.`,
