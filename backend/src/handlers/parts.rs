@@ -247,8 +247,23 @@ pub async fn list(
         );
     }
     if q.search.is_some() {
-        where_clauses
-            .push("(p.name LIKE ? OR p.description LIKE ? OR p.internalPartNumber LIKE ?)");
+        // Cast a wide net so the toolbar scanner / search box catches
+        // anything printed on a part label or vendor packaging:
+        //  - name / description / IPN (the obvious local fields)
+        //  - manufacturer P/N (matches what's printed on the part itself)
+        //  - distributor orderNumber + sku (Mouser SKU, Digi-Key SKU)
+        // Six LIKE's total. EXISTS subqueries on the M:M tables avoid
+        // multiplying rows.
+        where_clauses.push(
+            "(p.name LIKE ? \
+              OR p.description LIKE ? \
+              OR p.internalPartNumber LIKE ? \
+              OR EXISTS (SELECT 1 FROM PartManufacturer pm \
+                         WHERE pm.part_id = p.id AND pm.partNumber LIKE ?) \
+              OR EXISTS (SELECT 1 FROM PartDistributor pd \
+                         WHERE pd.part_id = p.id \
+                           AND (pd.orderNumber LIKE ? OR pd.sku LIKE ?)))",
+        );
     }
     if let Some(only) = q.meta_only {
         if only {
@@ -364,8 +379,12 @@ pub async fn list(
     }
     if let Some(s) = q.search.as_deref() {
         let pat = format!("%{s}%");
-        sel = sel.bind(pat.clone()).bind(pat.clone()).bind(pat.clone());
-        cnt = cnt.bind(pat.clone()).bind(pat.clone()).bind(pat);
+        // Six binds, matching the six LIKEs in the WHERE clause:
+        // name, description, IPN, mfg.partNumber, dist.orderNumber, dist.sku.
+        for _ in 0..6 {
+            sel = sel.bind(pat.clone());
+            cnt = cnt.bind(pat.clone());
+        }
     }
     // Slice 6a binds, in the same order the WHERE clauses were appended.
     if let Some(did) = q.distributor_id {

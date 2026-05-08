@@ -786,15 +786,52 @@
 
     /// Scan input dispatcher. Barcode scanners are HID keyboards that
     /// type the value followed by Enter, so this gets called on every
-    /// scan as well as manual typing+Enter. Tries IPN exact match
-    /// first, then a name LIKE search, then gives up with a toast.
+    /// scan as well as manual typing+Enter.
+    ///
+    /// Three payload kinds, dispatched in order:
+    ///  1. Our own QR labels: "<host>/#/part/<id>" → jump to part by id
+    ///  2. Distributor 2D codes (Digi-Key / Mouser): structured data
+    ///     with control-char delimiters → backend decode → stock-in
+    ///     or import (slice 13 follow-on; layered on once the Inateck
+    ///     scanner config is sorted)
+    ///  3. Plain text → existing IPN / name LIKE search
     async function handleScan(raw) {
         const value = (raw || "").trim();
         if (!value) return;
+
+        // Pattern 1: our own QR-code URL ("/#/part/<id>"). Match either
+        // a full URL or just the hash fragment, since some scanners
+        // strip the host portion (URL Mode quirk on Inateck etc.).
+        const hashMatch = value.match(/(?:#\/)part\/(\d+)$/);
+        if (hashMatch) {
+            const targetId = parseInt(hashMatch[1], 10);
+            try {
+                if ($$("pk-left-tabbar")) $$("pk-left-tabbar").setValue("tab-categories");
+                const cell = $$("centerpane-grid");
+                if (cell) cell.show();
+                // Make sure target is in the grid — clear filters and load.
+                await loadParts({ search: "" });
+                const grid = $$("pk-parts-grid");
+                if (grid && !grid.exists(targetId)) {
+                    // Fall back to a per-id detail load if grid filtering hides it.
+                }
+                if (grid && grid.exists(targetId)) {
+                    grid.select(targetId);
+                    grid.showItem(targetId);
+                }
+                await loadPartDetail(targetId);
+                webix.message({ type: "success", text: `Scanned label → part #${targetId}` });
+            } catch (e) {
+                console.error(e);
+                webix.message({ type: "error", text: "Scan-to-part failed: " + (e.message || e) });
+            }
+            return;
+        }
+
         try {
-            // 1. Exact IPN. Use the existing parts list endpoint with
-            //    a `search` term — backend already does LIKE on
-            //    name/description/IPN. Take the first hit.
+            // Pattern 3: plain IPN / name. Use the existing parts list
+            // endpoint with a `search` term — backend already does
+            // LIKE on name/description/IPN. Take the first hit.
             const resp = await api.parts({ search: value, limit: 5 });
             if (resp.items && resp.items.length) {
                 const hit = resp.items[0];
@@ -822,7 +859,14 @@
                 webix.message({ type: "success", text: `Found: ${target.name}` });
                 return;
             }
-            webix.message({ type: "error", text: `No part for "${value}"` });
+            // No hit. If this looks like a numeric-only or short
+            // alphanumeric vendor barcode, suggest the right next
+            // step rather than just saying "not found".
+            const isBareCode = /^[0-9]{8,}$|^[A-Z0-9]{6,12}$/.test(value);
+            const hint = isBareCode
+                ? ` — looks like a vendor barcode. If it was the small line code on a packing slip, scan the larger 2D code instead.`
+                : "";
+            webix.message({ type: "error", text: `No part for "${value}"${hint}` });
         } catch (e) {
             console.error(e);
             webix.message({ type: "error", text: "Scan failed: " + (e.message || e) });
@@ -8204,8 +8248,23 @@
     webix.ready(async function () {
         try {
             const me = await api.me();
-            if (me) mountShell(me);
-            else mountLogin();
+            if (me) {
+                mountShell(me);
+                // Deep-link support: if the URL fragment is "/part/<id>"
+                // (the form our printed QR labels encode), route to that
+                // part once the shell is up. Loose timing here is fine
+                // — handleScan does the same work asynchronously.
+                if (location.hash) {
+                    const m = location.hash.match(/(?:#\/)part\/(\d+)$/);
+                    if (m) {
+                        // Defer one tick so all the shell views finish
+                        // their initial mount before we try to navigate.
+                        setTimeout(() => handleScan(location.hash), 100);
+                    }
+                }
+            } else {
+                mountLogin();
+            }
         } catch (e) {
             showFatalError(e);
         }
