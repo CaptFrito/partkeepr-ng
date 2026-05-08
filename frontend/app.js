@@ -5907,13 +5907,6 @@
     // so a Webix combo can render it linearly while still showing the path.
     function flattenCategoryTree(tree) {
         const out = [];
-        // Webix's richselect renders the `value` string through an HTML
-        // template that collapses runs of regular whitespace, so a
-        // plain "  " prefix is invisible in the dropdown. Use a
-        // non-breaking space (U+00A0) — HTML preserves it — to make
-        // depth visible. Four NBSPs per level reads cleanly without
-        // pushing deep entries off the right edge.
-        const INDENT_UNIT = "    ";
         function walk(nodes, depth) {
             // Sort siblings alphabetically (case-insensitive); preserves
             // hierarchy while making it easier to find a category by
@@ -5922,13 +5915,26 @@
                 (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
             );
             for (const n of sorted) {
-                const prefix = INDENT_UNIT.repeat(depth);
-                out.push({ id: n.id, value: prefix + n.name });
+                // value = bare name (drives closed-selector display);
+                // depth = drives indent in the open list via the
+                // dropdown body template (see categoryOptionTemplate).
+                out.push({ id: n.id, value: n.name, depth: depth });
                 if (n.children && n.children.length) walk(n.children, depth + 1);
             }
         }
         walk(tree, 0);
         return out;
+    }
+
+    /// Body template for richselect dropdowns whose options came from
+    /// `flattenCategoryTree`. Emits `&nbsp;` entities for indent —
+    /// HTML entities survive Webix's whitespace handling, where
+    /// regular spaces and even raw U+00A0 don't reliably make it
+    /// through to the rendered output. Four NBSPs per depth level.
+    function categoryOptionTemplate(o) {
+        const depth = o && o.depth ? o.depth : 0;
+        const indent = new Array(depth + 1).join("&nbsp;&nbsp;&nbsp;&nbsp;");
+        return indent + escapeHtml(o.value || "");
     }
 
     // ============================================================
@@ -6392,7 +6398,7 @@
                                             name: "category_id",
                                             label: "Category",
                                             labelWidth: 130,
-                                            options: { data: categoryOptions, body: { template: "#value#" } },
+                                            options: { data: categoryOptions, body: { template: categoryOptionTemplate } },
                                         },
                                         {
                                             view: "richselect",
@@ -7683,7 +7689,7 @@
                             {
                                 cols: [
                                     { view: "richselect", name: "category_id", label: "Category",
-                                      options: categoryOptions,
+                                      options: { data: categoryOptions, body: { template: categoryOptionTemplate } },
                                       value: defaultCategoryId },
                                     { view: "richselect", name: "part_unit_id", label: "Unit",
                                       options: partUnitOptions, width: 280,
