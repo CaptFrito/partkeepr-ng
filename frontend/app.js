@@ -3358,21 +3358,16 @@
                         },
                         {
                             view: "button",
-                            id: "pk-dk-receive-button",
-                            value: "📦 Receive DK Order",
+                            id: "pk-receive-button",
+                            value: "📦 Receive Order",
                             css: "pk-btn-add",
-                            width: 175,
-                            hidden: true,  // shown only when Digi-Key is configured
-                            click: () => openOrderReceiveDialog("digikey"),
-                        },
-                        {
-                            view: "button",
-                            id: "pk-mouser-receive-button",
-                            value: "📦 Receive Mouser Order",
-                            css: "pk-btn-add",
-                            width: 195,
-                            hidden: true,  // shown only when Mouser order key is set
-                            click: () => openOrderReceiveDialog("mouser"),
+                            width: 165,
+                            hidden: true,  // shown only when ≥1 source has order_status_available
+                            // Default: pick the only-configured source if exactly
+                            // one is enabled, else "digikey" (richer data, larger
+                            // catalog). The dialog itself has a source picker
+                            // when ≥2 sources are available.
+                            click: () => openOrderReceiveDialog(defaultReceiveSource()),
                         },
                         {
                             view: "button",
@@ -7451,28 +7446,54 @@
             }
             btn.show();
         }
-        // 12b.2: Digi-Key Order Status receive button — only when DK is configured.
-        const dkBtn = $$("pk-dk-receive-button");
-        if (dkBtn && lookupCapsCache && lookupCapsCache.digikey && lookupCapsCache.digikey.order_status_available) {
-            dkBtn.show();
-        }
-        // 12a.2: Mouser Order History receive button — only when the
-        // separate order key is set (PARTKEEPR_MOUSER_ORDER_KEY).
-        const mouserBtn = $$("pk-mouser-receive-button");
-        if (mouserBtn && lookupCapsCache && lookupCapsCache.mouser && lookupCapsCache.mouser.order_status_available) {
-            mouserBtn.show();
+        // Unified receive button — shown whenever ≥1 source has
+        // order_status_available. Source picker lives inside the dialog.
+        const recvBtn = $$("pk-receive-button");
+        const recvSources = availableReceiveSources();
+        if (recvBtn && recvSources.length >= 1) {
+            recvBtn.show();
         }
     }
 
+    /// Sources that have `order_status_available: true`. Independent of
+    /// search availability — Mouser has two distinct keys.
+    function availableReceiveSources() {
+        const out = [];
+        if (lookupCapsCache && lookupCapsCache.digikey
+            && lookupCapsCache.digikey.order_status_available) out.push("digikey");
+        if (lookupCapsCache && lookupCapsCache.mouser
+            && lookupCapsCache.mouser.order_status_available) out.push("mouser");
+        return out;
+    }
+
+    function defaultReceiveSource() {
+        const sources = availableReceiveSources();
+        if (sources.length === 0) return "digikey";  // shouldn't open anyway
+        // Per-user persistence so re-opens default to last choice.
+        const key = `pk:receive:last-source:${currentUser ? currentUser.username : "anon"}`;
+        const saved = localStorage.getItem(key);
+        if (saved && sources.includes(saved)) return saved;
+        return sources[0];
+    }
+
     /// Optional opts:
-    ///   prefillSource: "digikey" | "mouser" — force the active source
-    ///   prefillMpn:    string — pre-fills the search box and runs an
-    ///                  immediate "by MPN" search
-    ///   onImported:    async (importResp) => void — called after a
-    ///                  successful import. When provided, the dialog
-    ///                  skips its default post-import behavior (loading
-    ///                  parts grid, selecting the row) so the caller
-    ///                  controls what happens next.
+    ///   prefillSource:      "digikey" | "mouser" — force the active source
+    ///   prefillMpn:         string — pre-fills the search box and runs an
+    ///                       immediate "by MPN" search
+    ///   forceDistributorPn: string — overwrite the search result's
+    ///                       distributor_pn before import. Required for
+    ///                       the receive flow's "🔎 Import" path: the
+    ///                       order line carries the *real* distributor
+    ///                       SKU (e.g. "617-21348000380010"), but
+    ///                       Mouser's Search API may return "N/A" for
+    ///                       MouserPartNumber on some MPNs. Without
+    ///                       this override the imported PartDistributor
+    ///                       has the wrong orderNumber and the receive
+    ///                       dialog won't match the line on re-fetch.
+    ///   onImported:         async (importResp) => void — called after a
+    ///                       successful import. When provided, the dialog
+    ///                       skips its default post-import behavior so
+    ///                       the caller controls what happens next.
     async function openLookupSearchDialog(opts) {
         opts = opts || {};
         // Make sure lookupsCache is loaded — categories + part_units
@@ -7737,6 +7758,11 @@
             }
             const result = Object.assign({}, selectedResult);
             delete result.id;
+            // Caller-supplied SKU override — see opts.forceDistributorPn
+            // doc above. Empty string fails-safe: leave search result intact.
+            if (opts.forceDistributorPn && opts.forceDistributorPn.trim()) {
+                result.distributor_pn = opts.forceDistributorPn.trim();
+            }
             try {
                 const resp = await api.lookupImport(activeSource, result, categoryId, partUnitId);
                 $$(winId).close();
@@ -7807,14 +7833,15 @@
         const winId = "pk-dk-receive-dialog";
         if ($$(winId)) { $$(winId).destructor(); }
 
-        const sourceLabel = source === "mouser" ? "Mouser" : "Digi-Key";
+        const sourceLabel = (s) => s === "mouser" ? "Mouser" : "Digi-Key";
+        const skuHeaderFor = (s) => s === "mouser" ? "Mouser P/N" : "DK P/N";
 
         let preview = null;  // OrderStatusResponse from the last fetch
         let lineState = [];  // per-line: {apply: bool, quantity: int}
 
         const headTpl = (sid) => sid
-            ? `Receive ${sourceLabel} Sales Order #${sid}`
-            : `Receive ${sourceLabel} Sales Order`;
+            ? `Receive ${sourceLabel(source)} Sales Order #${sid}`
+            : `Receive ${sourceLabel(source)} Sales Order`;
 
         webix.ui({
             view: "window",
@@ -7826,6 +7853,52 @@
             head: headTpl(null),
             body: {
                 rows: [
+                    // Source picker — shown only when 2+ sources are configured.
+                    (function () {
+                        const sources = availableReceiveSources();
+                        if (sources.length < 2) return { hidden: true, height: 0 };
+                        return {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 40,
+                            cols: [
+                                { view: "label", label: "Source:", width: 75, css: "pk-pane-title" },
+                                {
+                                    view: "segmented",
+                                    id: "pk-rcv-source",
+                                    value: source,
+                                    width: 320,
+                                    options: sources.map((s) => ({
+                                        id: s,
+                                        value: s === "digikey" ? "Digi-Key" : "Mouser",
+                                    })),
+                                    on: {
+                                        onChange: function (newSrc) {
+                                            source = newSrc;
+                                            // Persist + reset transient state.
+                                            const k = `pk:receive:last-source:${currentUser ? currentUser.username : "anon"}`;
+                                            localStorage.setItem(k, newSrc);
+                                            preview = null;
+                                            lineState = [];
+                                            $$("pk-dk-rcv-grid").clearAll();
+                                            $$("pk-dk-rcv-status").define("label", "");
+                                            $$("pk-dk-rcv-status").refresh();
+                                            const win = $$(winId);
+                                            if (win) win.config.head = headTpl(null);
+                                            // Update the SKU column header live.
+                                            const grid = $$("pk-dk-rcv-grid");
+                                            if (grid) {
+                                                grid.config.columns.find(c => c.id === "digikey_pn").header = skuHeaderFor(newSrc);
+                                                grid.refreshColumns();
+                                            }
+                                            refreshSummary();
+                                        },
+                                    },
+                                },
+                                {},
+                            ],
+                        };
+                    })(),
                     // Row 1: SO# input + Fetch.
                     {
                         view: "toolbar",
@@ -7874,7 +7947,7 @@
                                 css: "right",
                             },
                             { id: "line_number", header: "Line", width: 56, css: "right" },
-                            { id: "digikey_pn", header: "DK P/N", width: 150 },
+                            { id: "digikey_pn", header: skuHeaderFor(source), width: 150 },
                             { id: "mpn", header: "MPN", width: 170 },
                             {
                                 id: "_match",
@@ -8047,6 +8120,11 @@
             openLookupSearchDialog({
                 prefillSource: source,  // mouser → mouser; digikey → digikey
                 prefillMpn: mpn,
+                // Force the imported PartDistributor.orderNumber to be the
+                // *order line's* distributor SKU. Without this, Mouser
+                // sometimes returns MouserPartNumber="N/A" and the line
+                // never matches on re-fetch.
+                forceDistributorPn: li.digikey_pn,
                 onImported: async () => {
                     // Refresh the parts grid so future stock-entries can land.
                     try { await loadParts({ search: "" }); } catch (_) {}
