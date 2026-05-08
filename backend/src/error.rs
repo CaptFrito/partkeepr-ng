@@ -9,6 +9,7 @@ use serde_json::json;
 /// `models/` use a different (older) `(StatusCode, String)` shape; that's
 /// fine — they're list-only stubs and will be retired as features replace
 /// them.
+#[derive(Debug)]
 pub enum AppError {
     NotFound(&'static str),
     BadRequest(&'static str),

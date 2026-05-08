@@ -244,7 +244,12 @@ pub async fn fetch_project_attachment(
     fetch_url_core(&pool, &store, AttachmentKind::ProjectAttachment, parent_id, req).await
 }
 
-async fn fetch_url_core(
+/// Internal: fetch a URL's contents and create an attachment row of
+/// the given kind for the given parent. Used by the per-kind
+/// `fetch_*` HTTP handlers above, and by the Mouser import flow
+/// (`handlers/mouser.rs`) to attach datasheets and manufacturer
+/// images on demand. Public so cross-module callers can drive it.
+pub async fn fetch_url_core(
     pool: &MySqlPool,
     store: &StorageConfig,
     kind: AttachmentKind,
@@ -893,6 +898,6 @@ async fn lookup_row(
 /// dynamically-built error messages so the variant doesn't need
 /// widening just for slice 7. The leaks are bounded to the count of
 /// distinct upload errors (small).
-fn leak(s: String) -> &'static str {
+pub(crate) fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }

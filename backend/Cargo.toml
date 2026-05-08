@@ -24,7 +24,7 @@ mime_guess = "2"
 # Slice 7 follow-up: server-side URL fetching for "Attach by URL".
 # rustls-tls keeps the dep tree native-Rust (no OpenSSL), stream
 # enables streaming response bodies (we cap upload size while reading).
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -532,6 +532,31 @@
             if (!r.ok) throw new Error(`printer info failed: ${r.status}`);
             return r.json();
         },
+        async lookupCapabilities() {
+            const r = await fetch("/api/lookup/capabilities");
+            if (!r.ok) throw new Error(`lookup capabilities failed: ${r.status}`);
+            return r.json();
+        },
+        async mouserSearch(q, by) {
+            const r = await fetch("/api/lookup/mouser/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ q, by }),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `mouser search failed: ${r.status}`);
+            return data;
+        },
+        async mouserImport(result, categoryId, partUnitId) {
+            const r = await fetch("/api/lookup/mouser/import", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ result, category_id: categoryId, part_unit_id: partUnitId }),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `mouser import failed: ${r.status}`);
+            return data;
+        },
         async metaMatches(metaPartId) {
             const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
             if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
@@ -674,6 +699,9 @@
         ensureFilterDistributorsLoaded();
         // Restore per-user parts-grid layout (W8c).
         setTimeout(restorePartsGridState, 0);
+        // Slice 12a.1: figure out which lookup sources are
+        // available; reveal the "🔎 Add via Mouser" button on hit.
+        refreshLookupCapabilities();
 
         // Lazy-load the other trees the first time the user switches to
         // them. Webix tabbar with multiview:true auto-fires onChange when
@@ -3288,6 +3316,15 @@
                             css: "pk-btn-meta",
                             width: 125,
                             click: () => openPartEditor("new", { metaPart: true }),
+                        },
+                        {
+                            view: "button",
+                            id: "pk-mouser-button",
+                            value: "🔎 Add via Mouser",
+                            css: "pk-btn-add",
+                            width: 165,
+                            hidden: true,  // shown only when capabilities reports available
+                            click: () => openMouserSearchDialog(),
                         },
                         {
                             view: "button",
@@ -7174,6 +7211,254 @@
             } else if (!printAvailable) {
                 // Printing not configured — leave the chip blank.
                 statusView.setHTML("");
+            }
+        }
+    }
+
+    // ============================================================
+    //  Slice 12a.1 — Mouser search dialog
+    //
+    //  Capabilities are fetched on shell mount; the toolbar button
+    //  is unhidden when caps.mouser.available is true. The dialog
+    //  itself: search input + results datatable + category/unit
+    //  pickers + Import. Backend handles the heavy lifting (auto-
+    //  create manufacturer, fetch datasheet/image via slice-7's
+    //  by-URL pipeline).
+    // ============================================================
+
+    let lookupCapsCache = null;
+
+    /// Pull capabilities once after the shell mounts; reveal the
+    /// "🔎 Add via Mouser" button when configured.
+    async function refreshLookupCapabilities() {
+        try {
+            lookupCapsCache = await api.lookupCapabilities();
+        } catch (e) {
+            console.warn("lookupCapabilities failed:", e);
+            return;
+        }
+        const btn = $$("pk-mouser-button");
+        if (btn && lookupCapsCache && lookupCapsCache.mouser && lookupCapsCache.mouser.available) {
+            btn.show();
+        }
+    }
+
+    async function openMouserSearchDialog() {
+        // Make sure lookupsCache is loaded — categories + part_units
+        // power the two dropdowns at the bottom of the dialog. Same
+        // pattern as openPartEditor / openCommonParamsDialog.
+        try {
+            await ensureLookups();
+        } catch (e) {
+            webix.message({ type: "error", text: "Failed to load lookups: " + (e.message || e) });
+            return;
+        }
+        const categoryOptions = flattenCategoryTree(lookupsCache.categories_tree);
+        const partUnitOptions = lookupsCache.part_units.map((u) => ({
+            id: u.id,
+            value: u.name + (u.short_name ? ` (${u.short_name})` : ""),
+        }));
+        // Prefer the is_default=true row if present.
+        const defaultPartUnit = lookupsCache.part_units.find((u) => u.is_default)
+            || lookupsCache.part_units[0];
+        const defaultCategory = categoryOptions[0];
+
+        // Track the selected result by id so the Import button can
+        // grab it from the cached items list.
+        let lastSearchItems = [];
+        let selectedResult = null;
+
+        const winId = "pk-mouser-dialog";
+
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 980,
+            height: 640,
+            head: "Add part via Mouser",
+            body: {
+                rows: [
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 50,
+                        cols: [
+                            {
+                                view: "segmented",
+                                id: "pk-mouser-by",
+                                value: "partnumber",
+                                width: 280,
+                                options: [
+                                    { id: "partnumber", value: "By MPN" },
+                                    { id: "keyword",    value: "By keyword" },
+                                ],
+                            },
+                            {
+                                view: "search",
+                                id: "pk-mouser-q",
+                                placeholder: "MPN or keyword…",
+                                on: {
+                                    onEnter: function () { runMouserSearch(); },
+                                    onSearchIconClick: function () { runMouserSearch(); },
+                                },
+                            },
+                            { view: "button", value: "🔎 Search", width: 110, css: "webix_primary",
+                              click: () => runMouserSearch() },
+                        ],
+                    },
+                    {
+                        view: "datatable",
+                        id: "pk-mouser-results",
+                        css: "pk-grid",
+                        select: "row",
+                        columns: [
+                            { id: "mpn", header: "MPN", width: 200 },
+                            { id: "manufacturer_name", header: "Manufacturer", width: 180 },
+                            { id: "description", header: "Description", fillspace: true },
+                            { id: "_stock", header: "Stock", width: 90, css: "pk-numeric",
+                              template: (o) => {
+                                  // availability looks like "In Stock: 1234"
+                                  const m = (o.availability || "").match(/(\d[\d,]*)/);
+                                  return m ? m[1] : "";
+                              } },
+                            { id: "_price", header: "Price (1)", width: 90, css: "pk-numeric",
+                              template: (o) => {
+                                  const pb = (o.price_breaks || [])[0];
+                                  return pb ? `${pb.price} ${pb.currency}` : "";
+                              } },
+                            { id: "distributor_pn", header: "Mouser P/N", width: 140 },
+                        ],
+                        on: {
+                            onAfterSelect: function (sel) {
+                                const item = this.getItem(sel.id);
+                                selectedResult = item || null;
+                                refreshSelectedLabel();
+                                $$("pk-mouser-import-btn").enable();
+                            },
+                        },
+                    },
+                    {
+                        view: "template",
+                        id: "pk-mouser-selected",
+                        height: 26,
+                        borderless: true,
+                        template: '<span style="padding:0 12px;color:#6a7a8a">Pick a result, then choose category + unit and click Import.</span>',
+                    },
+                    {
+                        view: "form",
+                        id: "pk-mouser-form",
+                        height: 70,
+                        elementsConfig: { labelWidth: 90 },
+                        elements: [
+                            {
+                                cols: [
+                                    { view: "richselect", name: "category_id", label: "Category",
+                                      options: categoryOptions,
+                                      value: defaultCategory ? defaultCategory.id : null },
+                                    { view: "richselect", name: "part_unit_id", label: "Unit",
+                                      options: partUnitOptions, width: 280,
+                                      value: defaultPartUnit ? defaultPartUnit.id : null },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        css: "pk-dialog-actions",
+                        height: 50,
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100, click: () => $$(winId).close() },
+                            {
+                                view: "button",
+                                id: "pk-mouser-import-btn",
+                                value: "Import",
+                                width: 130,
+                                css: "pk-btn-add",
+                                disabled: true,
+                                click: () => importSelected(),
+                            },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        function refreshSelectedLabel() {
+            const t = $$("pk-mouser-selected");
+            if (!t || !selectedResult) return;
+            t.setHTML(`<span style="padding:0 12px;color:#1f2933">Selected: <b>${escapeHtml(selectedResult.mpn)}</b> — ${escapeHtml(selectedResult.manufacturer_name)}</span>`);
+        }
+
+        async function runMouserSearch() {
+            const q = ($$("pk-mouser-q").getValue() || "").trim();
+            const by = $$("pk-mouser-by").getValue() || "partnumber";
+            if (!q) {
+                webix.message({ type: "error", text: "Type something to search" });
+                return;
+            }
+            const grid = $$("pk-mouser-results");
+            if (grid) { grid.clearAll(); }
+            $$("pk-mouser-import-btn").disable();
+            selectedResult = null;
+            try {
+                const resp = await api.mouserSearch(q, by);
+                lastSearchItems = (resp.items || []).map((it, i) => Object.assign({ id: i + 1 }, it));
+                if (grid) grid.parse(lastSearchItems);
+                if (resp.errors && resp.errors.length) {
+                    webix.message({ type: "warning", text: resp.errors.join(" · ") });
+                }
+                if (lastSearchItems.length === 0) {
+                    webix.message({ type: "info", text: "No results" });
+                }
+            } catch (e) {
+                console.error(e);
+                webix.message({ type: "error", text: "Search failed: " + (e.message || e) });
+            }
+        }
+
+        async function importSelected() {
+            if (!selectedResult) return;
+            const v = $$("pk-mouser-form").getValues();
+            const categoryId = parseInt(v.category_id, 10);
+            const partUnitId = parseInt(v.part_unit_id, 10);
+            if (!categoryId || !partUnitId) {
+                webix.message({ type: "error", text: "Pick a category and a unit" });
+                return;
+            }
+            // Strip the synthetic id we added for the datatable.
+            const result = Object.assign({}, selectedResult);
+            delete result.id;
+            try {
+                const resp = await api.mouserImport(result, categoryId, partUnitId);
+                $$(winId).close();
+                // Tell the operator what landed; warn separately on
+                // attachment-fetch failures.
+                const bits = [`Imported ${selectedResult.mpn}`];
+                if (resp.datasheet_attachment_id) bits.push("datasheet ✓");
+                else if (resp.datasheet_error) bits.push("datasheet ⚠");
+                if (resp.logo_attachment_id) bits.push("logo ✓");
+                else if (resp.logo_error) bits.push("logo ⚠");
+                webix.message({ type: "success", text: bits.join(" · ") });
+                if (resp.datasheet_error) {
+                    console.warn("datasheet fetch failed:", resp.datasheet_error);
+                }
+                if (resp.logo_error) {
+                    console.warn("logo fetch failed:", resp.logo_error);
+                }
+                // Refresh the parts grid + select the new part.
+                await loadParts({ search: "" });
+                const grid = $$("pk-parts-grid");
+                if (grid && grid.exists(resp.part_id)) {
+                    grid.select(resp.part_id);
+                    grid.showItem(resp.part_id);
+                }
+                await loadPartDetail(resp.part_id);
+            } catch (e) {
+                console.error(e);
+                webix.message({ type: "error", text: "Import failed: " + (e.message || e) });
             }
         }
     }
