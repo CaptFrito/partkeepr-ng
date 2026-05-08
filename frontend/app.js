@@ -819,6 +819,30 @@
         };
     }
 
+    /// Module-scoped "last scanned part" memory: set whenever
+    /// handleScan navigates to a part. A subsequent pure-numeric
+    /// scan within PENDING_TTL_MS is treated as a quantity for
+    /// that part, enabling the Mini-Circuits-style two-barcode
+    /// workflow (one Code-39 for MPN, one for quantity).
+    const PENDING_TTL_MS = 30_000;
+    let pendingScanPart = null;  // { id, name, ts }
+
+    function notePendingScanPart(part) {
+        pendingScanPart = part ? {
+            id: part.id, name: part.name, ts: Date.now(),
+        } : null;
+    }
+    function takePendingScanPart() {
+        if (!pendingScanPart) return null;
+        if (Date.now() - pendingScanPart.ts > PENDING_TTL_MS) {
+            pendingScanPart = null;
+            return null;
+        }
+        const out = pendingScanPart;
+        pendingScanPart = null;
+        return out;
+    }
+
     /// Open a focused-capture overlay that intercepts every keydown
     /// at the document level, suppresses browser shortcuts (Alt+digit
     /// tab switching, Ctrl+T new tab, etc.), and reconstructs the
@@ -1065,15 +1089,56 @@
     /// type the value followed by Enter, so this gets called on every
     /// scan as well as manual typing+Enter.
     ///
-    /// Three payload kinds, dispatched in order:
+    /// Four payload kinds, dispatched in order:
     ///  1. Distributor 2D codes (Digi-Key / Mouser packing slips and
     ///     per-reel labels): structured ANSI MH10.8.2 data → parse
     ///     locally → match against PartDistributor → stock-in or import
-    ///  2. Our own QR labels: "<host>/#/part/<id>" → jump to part by id
-    ///  3. Plain text → existing IPN / MPN / SKU / name LIKE search
+    ///  2. Pure-numeric scan after a recent part scan (Mini-Circuits-
+    ///     style two-code reels: MPN barcode, then qty barcode) →
+    ///     prompt to receive that quantity into the pending part.
+    ///  3. Our own QR labels: "<host>/#/part/<id>" → jump to part by id
+    ///  4. Plain text → existing IPN / MPN / SKU / name LIKE search
     async function handleScan(raw) {
         const value = (raw || "").trim();
         if (!value) return;
+
+        // Pattern 2: pure-digit follow-up to a recent part scan. Mini-
+        // Circuits reels and others pair an MPN Code-39 with a separate
+        // quantity Code-39; this lets the operator scan both in
+        // sequence without typing. Bound: 1-5 digits, value 1-99999,
+        // and a part scan within PENDING_TTL_MS. Distributor 2D codes
+        // get checked first (they may also be all-digit-ish if RS
+        // chars stripped out), and UPCs/EANs (12-13 digits) won't
+        // qualify thanks to the length cap.
+        if (/^\d{1,5}$/.test(value)) {
+            const pending = takePendingScanPart();
+            if (pending) {
+                const qty = parseInt(value, 10);
+                if (qty > 0) {
+                    webix.confirm({
+                        title: "Receive scanned quantity",
+                        text: `Add <b>+${qty}</b> to <b>${escapeHtml(pending.name)}</b>?`,
+                        ok: "Add stock", cancel: "Skip",
+                    }).then(async (yes) => {
+                        if (!yes) return;
+                        try {
+                            await api.addStockEntry(pending.id, {
+                                stock_level: qty,
+                                comment: "Barcode scan (qty pair)",
+                                correction: false,
+                            });
+                            await loadPartDetail(pending.id);
+                            webix.message({ type: "success", text: `+${qty} stocked` });
+                        } catch (e) {
+                            webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
+                        }
+                    });
+                    return;
+                }
+            }
+            // No pending part — fall through to plain search (it'll
+            // probably miss; that's OK).
+        }
 
         // Pattern 1: distributor 2D barcode. Detect by ANSI MH10.8.2
         // header "[)>" with or without delimiters surviving the
@@ -1115,6 +1180,7 @@
                     grid.showItem(targetId);
                 }
                 await loadPartDetail(targetId);
+                notePendingScanPart({ id: targetId, name: `part #${targetId}` });
                 webix.message({ type: "success", text: `Scanned label → part #${targetId}` });
             } catch (e) {
                 console.error(e);
@@ -1151,6 +1217,7 @@
                     }
                 }
                 await loadPartDetail(target.id);
+                notePendingScanPart(target);
                 webix.message({ type: "success", text: `Found: ${target.name}` });
                 return;
             }
@@ -1232,6 +1299,7 @@
                     grid.select(matched.id); grid.showItem(matched.id);
                 }
                 await loadPartDetail(matched.id);
+                notePendingScanPart(matched);
             } catch (_) {}
 
             if (fields.quantity && fields.quantity > 0) {
