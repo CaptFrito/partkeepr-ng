@@ -557,6 +557,26 @@
             if (!r.ok) throw new Error((data && data.error) || `${source} import failed: ${r.status}`);
             return data;
         },
+        async digikeyOrderStatus(orderId) {
+            const r = await fetch("/api/lookup/digikey/order-status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ order_id: orderId }),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `digikey order-status failed: ${r.status}`);
+            return data;
+        },
+        async digikeyOrderReceive(orderId, lines) {
+            const r = await fetch("/api/lookup/digikey/order-receive", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ order_id: orderId, lines }),
+            });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.error) || `digikey order-receive failed: ${r.status}`);
+            return data;
+        },
         async metaMatches(metaPartId) {
             const r = await fetch(`/api/parts/${metaPartId}/matches?limit=200`);
             if (!r.ok) throw new Error(`meta matches failed: ${r.status} ${await r.text()}`);
@@ -3329,6 +3349,15 @@
                             width: 165,
                             hidden: true,  // shown only when ≥1 source is configured
                             click: () => openLookupSearchDialog(),
+                        },
+                        {
+                            view: "button",
+                            id: "pk-dk-receive-button",
+                            value: "📦 Receive DK Order",
+                            css: "pk-btn-add",
+                            width: 175,
+                            hidden: true,  // shown only when Digi-Key is configured
+                            click: () => openDigiKeyReceiveDialog(),
                         },
                         {
                             view: "button",
@@ -7271,19 +7300,33 @@
             return;
         }
         const btn = $$("pk-lookup-button");
-        if (!btn) return;
         const sources = availableLookupSources();
-        if (sources.length === 0) return;  // stay hidden
-        if (sources.length === 1) {
-            const label = sources[0] === "digikey" ? "🔎 Add via Digi-Key" : "🔎 Add via Mouser";
-            btn.define("value", label);
-            btn.refresh();
+        if (btn && sources.length > 0) {
+            if (sources.length === 1) {
+                const label = sources[0] === "digikey" ? "🔎 Add via Digi-Key" : "🔎 Add via Mouser";
+                btn.define("value", label);
+                btn.refresh();
+            }
+            btn.show();
         }
-        // (>1 sources: keep the default "🔎 Add via lookup")
-        btn.show();
+        // 12b.2: Digi-Key Order Status receive button — only when DK is configured.
+        const dkBtn = $$("pk-dk-receive-button");
+        if (dkBtn && lookupCapsCache && lookupCapsCache.digikey && lookupCapsCache.digikey.available) {
+            dkBtn.show();
+        }
     }
 
-    async function openLookupSearchDialog() {
+    /// Optional opts:
+    ///   prefillSource: "digikey" | "mouser" — force the active source
+    ///   prefillMpn:    string — pre-fills the search box and runs an
+    ///                  immediate "by MPN" search
+    ///   onImported:    async (importResp) => void — called after a
+    ///                  successful import. When provided, the dialog
+    ///                  skips its default post-import behavior (loading
+    ///                  parts grid, selecting the row) so the caller
+    ///                  controls what happens next.
+    async function openLookupSearchDialog(opts) {
+        opts = opts || {};
         // Make sure lookupsCache is loaded — categories + part_units
         // power the two dropdowns at the bottom of the dialog. Same
         // pattern as openPartEditor / openCommonParamsDialog.
@@ -7326,6 +7369,10 @@
         const sources = availableLookupSources();
         const sourcePersistKey = `pk:lookup:last-source:${currentUser ? currentUser.username : "anon"}`;
         let activeSource = (function () {
+            // Caller-supplied source wins (e.g., DK Receive flow forces digikey).
+            if (opts.prefillSource && sources.includes(opts.prefillSource)) {
+                return opts.prefillSource;
+            }
             const saved = localStorage.getItem(sourcePersistKey);
             if (saved && sources.includes(saved)) return saved;
             // Default: digikey first (richer data), else mouser.
@@ -7555,16 +7602,352 @@
                 webix.message({ type: "success", text: bits.join(" · ") });
                 if (resp.datasheet_error) console.warn("datasheet fetch failed:", resp.datasheet_error);
                 if (resp.logo_error) console.warn("logo fetch failed:", resp.logo_error);
-                await loadParts({ search: "" });
-                const grid = $$("pk-parts-grid");
-                if (grid && grid.exists(resp.part_id)) {
-                    grid.select(resp.part_id);
-                    grid.showItem(resp.part_id);
+                if (opts.onImported) {
+                    // Caller-driven flow (e.g., DK Receive): they handle
+                    // the parts-grid refresh themselves.
+                    try { await opts.onImported(resp); }
+                    catch (cbErr) { console.error("onImported callback failed:", cbErr); }
+                } else {
+                    await loadParts({ search: "" });
+                    const grid = $$("pk-parts-grid");
+                    if (grid && grid.exists(resp.part_id)) {
+                        grid.select(resp.part_id);
+                        grid.showItem(resp.part_id);
+                    }
+                    await loadPartDetail(resp.part_id);
                 }
-                await loadPartDetail(resp.part_id);
             } catch (e) {
                 console.error(e);
                 webix.message({ type: "error", text: "Import failed: " + (e.message || e) });
+            }
+        }
+
+        // Auto-run the initial search if the caller pre-filled an MPN.
+        if (opts.prefillMpn) {
+            const qBox = $$("pk-lookup-q");
+            const byBox = $$("pk-lookup-by");
+            if (qBox) qBox.setValue(opts.prefillMpn);
+            if (byBox) byBox.setValue("partnumber");
+            // Defer so the dialog finishes mounting before we fire.
+            setTimeout(() => runLookupSearch(), 50);
+        }
+    }
+
+    // ============================================================
+    //  Slice 12b.2 — Receive Digi-Key Order
+    //
+    //  Operator types a Digi-Key Sales Order #, hits Fetch. We call
+    //  /order-status which fetches the order via Digi-Key OrderStatus
+    //  API and joins line items against PartDistributor on
+    //  (distributor=Digi-Key, orderNumber=line.digikey_pn). Each line
+    //  shows: ✓ apply | DK PN | MPN | qty shipped | unit price |
+    //  match status. Operator unchecks lines they don't want, edits
+    //  per-line quantity (defaults to qty_shipped), clicks Apply.
+    //
+    //  Apply POSTs the operator-confirmed lines to /order-receive,
+    //  which inserts a StockEntry per line with a comment of
+    //  "Digi-Key SO #{n} line {k}" — searchable in stock history.
+    //  Receiving the same SO twice is permitted (operator-permissive
+    //  per project policy); the duplicate stock-ins are visible in
+    //  the per-part history.
+    // ============================================================
+
+    async function openDigiKeyReceiveDialog() {
+        const winId = "pk-dk-receive-dialog";
+        if ($$(winId)) { $$(winId).destructor(); }
+
+        let preview = null;  // OrderStatusResponse from the last fetch
+        let lineState = [];  // per-line: {apply: bool, quantity: int}
+
+        const headTpl = (sid) => sid
+            ? `Receive Digi-Key Sales Order #${sid}`
+            : "Receive Digi-Key Sales Order";
+
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 1080,
+            height: 640,
+            head: headTpl(null),
+            body: {
+                rows: [
+                    // Row 1: SO# input + Fetch.
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 50,
+                        cols: [
+                            { view: "label", label: "Sales order #:", width: 130, css: "pk-pane-title" },
+                            {
+                                view: "text",
+                                id: "pk-dk-rcv-id",
+                                placeholder: "e.g. 81234567",
+                                width: 220,
+                                on: {
+                                    onEnter: function () { runFetch(); },
+                                },
+                            },
+                            { view: "button", value: "🔍 Fetch", width: 100, css: "webix_primary",
+                              click: () => runFetch() },
+                            {},
+                            {
+                                view: "label",
+                                id: "pk-dk-rcv-status",
+                                label: "",
+                                width: 380,
+                                css: "pk-pane-title",
+                            },
+                        ],
+                    },
+                    // Row 2: results datatable. Apply checkbox + editable qty.
+                    {
+                        view: "datatable",
+                        id: "pk-dk-rcv-grid",
+                        css: "pk-grid",
+                        editable: true,
+                        editaction: "click",
+                        select: false,
+                        columns: [
+                            {
+                                id: "_apply",
+                                header: { text: "✓", css: "right" },
+                                width: 40,
+                                template: "{common.checkbox()}",
+                                checkValue: true,
+                                uncheckValue: false,
+                                css: "right",
+                            },
+                            { id: "line_number", header: "Line", width: 56, css: "right" },
+                            { id: "digikey_pn", header: "DK P/N", width: 150 },
+                            { id: "mpn", header: "MPN", width: 170 },
+                            {
+                                id: "_match",
+                                header: "Match",
+                                width: 270,
+                                template: function (o) {
+                                    if (o.part_id) {
+                                        const stock = (o.current_stock != null) ? ` (stock ${o.current_stock})` : "";
+                                        return `<span style="color:#2a8a2a">✓ #${o.part_id} ${escapeHtml(o.part_name || "")}${stock}</span>`;
+                                    }
+                                    return `<span style="color:#aa6b2a">⚠ no match</span> ` +
+                                        `<span class="pk-dk-rcv-import webix_link" style="cursor:pointer;color:#2a6fb0">🔎 Import</span>`;
+                                },
+                            },
+                            { id: "quantity_shipped", header: "Qty shipped", width: 100, css: "right" },
+                            {
+                                id: "_qty",
+                                header: "Apply qty",
+                                width: 110,
+                                editor: "text",
+                                css: "right",
+                            },
+                            {
+                                id: "_price",
+                                header: "Unit price",
+                                width: 110,
+                                css: "right",
+                                template: function (o) {
+                                    if (!o.unit_price) return "";
+                                    return o.unit_price.toFixed(4) + " " + (preview && preview.currency || "");
+                                },
+                            },
+                            { id: "description", header: "Description", fillspace: true, minWidth: 200 },
+                        ],
+                        onClick: {
+                            "pk-dk-rcv-import": function (ev, rid) {
+                                const idx = this.getIndexById(rid);
+                                if (idx == null) return false;
+                                importLine(idx);
+                                return false;  // suppress row-click side effects
+                            },
+                        },
+                        on: {
+                            onCheck: function (rid, cid, val) {
+                                const idx = this.getIndexById(rid);
+                                if (lineState[idx]) lineState[idx].apply = !!val;
+                                refreshSummary();
+                            },
+                            onAfterEditStop: function (state, ed) {
+                                if (ed.column !== "_qty") return;
+                                const idx = this.getIndexById(ed.row);
+                                const n = parseInt(state.value, 10);
+                                if (!Number.isFinite(n) || n < 0) {
+                                    this.updateItem(ed.row, { _qty: lineState[idx].quantity });
+                                    return;
+                                }
+                                lineState[idx].quantity = n;
+                                refreshSummary();
+                            },
+                        },
+                    },
+                    // Row 3: summary + apply buttons.
+                    {
+                        view: "toolbar",
+                        css: "pk-pane-toolbar",
+                        height: 48,
+                        cols: [
+                            {
+                                view: "template",
+                                id: "pk-dk-rcv-summary",
+                                borderless: true,
+                                template: '<span style="padding:0 12px;color:#6a7a8a">Fetch a sales order to see lines.</span>',
+                            },
+                            { view: "button", value: "Cancel", width: 110,
+                              click: () => $$(winId) && $$(winId).destructor() },
+                            { view: "button", id: "pk-dk-rcv-apply", value: "✓ Apply stock-in",
+                              css: "pk-btn-add", width: 170, disabled: true,
+                              click: () => runApply() },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+        $$("pk-dk-rcv-id").focus();
+
+        function refreshSummary() {
+            const grid = $$("pk-dk-rcv-grid");
+            const sum = $$("pk-dk-rcv-summary");
+            const applyBtn = $$("pk-dk-rcv-apply");
+            if (!preview || !grid || !sum || !applyBtn) return;
+            let lines = 0, units = 0, skipped = 0, noMatch = 0;
+            grid.eachRow(function (rid) {
+                const idx = grid.getIndexById(rid);
+                const item = grid.getItem(rid);
+                const st = lineState[idx];
+                if (!st || !st.apply) { skipped++; return; }
+                if (!item.part_id) { noMatch++; return; }
+                if (!st.quantity || st.quantity <= 0) { skipped++; return; }
+                lines++;
+                units += st.quantity;
+            });
+            const txt = `${lines} line${lines === 1 ? "" : "s"} → +${units} unit${units === 1 ? "" : "s"} ` +
+                `· ${skipped} skipped` + (noMatch ? ` · ${noMatch} no-match (will skip)` : "");
+            sum.setHTML(`<span style="padding:0 12px">${escapeHtml(txt)}</span>`);
+            applyBtn.define("disabled", lines === 0);
+            applyBtn.refresh();
+        }
+
+        async function runFetch() {
+            const idStr = ($$("pk-dk-rcv-id").getValue() || "").trim();
+            const oid = parseInt(idStr, 10);
+            if (!Number.isFinite(oid) || oid <= 0) {
+                webix.message({ type: "error", text: "Enter a valid sales order #." });
+                return;
+            }
+            const status = $$("pk-dk-rcv-status");
+            status.define("label", "Fetching…");
+            status.refresh();
+            try {
+                preview = await api.digikeyOrderStatus(oid);
+            } catch (e) {
+                preview = null;
+                lineState = [];
+                $$("pk-dk-rcv-grid").clearAll();
+                status.define("label", "");
+                status.refresh();
+                refreshSummary();
+                webix.message({ type: "error", text: "Fetch failed: " + (e.message || e) });
+                return;
+            }
+            const win = $$(winId);
+            if (win) win.config.head = headTpl(preview.sales_order_id);
+            // Per-line: default apply=true when matched & shipped > 0;
+            // default qty = quantity_shipped (or quantity ordered if
+            // shipped is zero — typical for not-yet-shipped orders).
+            lineState = preview.lines.map((li) => {
+                const qty = li.quantity_shipped > 0 ? li.quantity_shipped : li.quantity_ordered;
+                return {
+                    apply: !!li.part_id && li.quantity_shipped > 0,
+                    quantity: qty || 0,
+                };
+            });
+            const rows = preview.lines.map((li, i) => Object.assign({}, li, {
+                id: i + 1,
+                _apply: lineState[i].apply,
+                _qty: lineState[i].quantity,
+            }));
+            const grid = $$("pk-dk-rcv-grid");
+            grid.clearAll();
+            grid.parse(rows);
+            const matched = preview.lines.filter((li) => li.part_id).length;
+            const total = preview.lines.length;
+            const shipped = preview.lines.filter((li) => li.quantity_shipped > 0).length;
+            status.define("label", `${total} line${total === 1 ? "" : "s"} · ${matched} matched · ${shipped} shipped`);
+            status.refresh();
+            refreshSummary();
+        }
+
+        /// Open the lookup-import dialog pre-filled with this line's
+        /// MPN; after a successful import, re-run Fetch so the receive
+        /// dialog's match column updates.
+        function importLine(idx) {
+            const li = preview && preview.lines[idx];
+            if (!li) return;
+            const mpn = (li.mpn || li.digikey_pn || "").trim();
+            if (!mpn) {
+                webix.message({ type: "error", text: "No MPN/SKU on this line." });
+                return;
+            }
+            openLookupSearchDialog({
+                prefillSource: "digikey",
+                prefillMpn: mpn,
+                onImported: async () => {
+                    // Refresh the parts grid so future stock-entries can land.
+                    try { await loadParts({ search: "" }); } catch (_) {}
+                    // Re-fetch the order so the just-imported line shows
+                    // matched. Cheaper than tracking partial state.
+                    if (preview) {
+                        $$("pk-dk-rcv-id").setValue(String(preview.sales_order_id));
+                        await runFetch();
+                    }
+                },
+            });
+        }
+
+        async function runApply() {
+            if (!preview) return;
+            const lines = [];
+            preview.lines.forEach((li, i) => {
+                const st = lineState[i];
+                if (!st || !st.apply) return;
+                if (!li.part_id) return;  // belt-and-braces; row hidden anyway
+                if (!st.quantity || st.quantity <= 0) return;
+                lines.push({
+                    part_id: li.part_id,
+                    quantity: st.quantity,
+                    price: li.unit_price ? li.unit_price.toFixed(4) : null,
+                    comment: null,
+                });
+            });
+            if (lines.length === 0) {
+                webix.message({ type: "info", text: "No lines selected." });
+                return;
+            }
+            const applyBtn = $$("pk-dk-rcv-apply");
+            applyBtn.disable();
+            try {
+                const resp = await api.digikeyOrderReceive(preview.sales_order_id, lines);
+                webix.message({
+                    type: "success",
+                    text: `Stocked ${resp.applied} line${resp.applied === 1 ? "" : "s"} from SO #${preview.sales_order_id}.`,
+                });
+                $$(winId) && $$(winId).destructor();
+                // Refresh the parts grid so updated stock levels show.
+                await loadParts({ search: "" });
+                // If a stock-changed part is currently selected, refresh detail too.
+                const grid = $$("pk-parts-grid");
+                if (grid) {
+                    const sel = grid.getSelectedId();
+                    if (sel && resp.results.some((r) => r.part_id === sel)) {
+                        await loadPartDetail(sel);
+                    }
+                }
+            } catch (e) {
+                applyBtn.enable();
+                console.error(e);
+                webix.message({ type: "error", text: "Apply failed: " + (e.message || e) });
             }
         }
     }

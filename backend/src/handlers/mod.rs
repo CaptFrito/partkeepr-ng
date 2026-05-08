@@ -254,4 +254,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/lookup/mouser/import", post(mouser::import))
         .route("/api/lookup/digikey/search", post(digikey::search))
         .route("/api/lookup/digikey/import", post(digikey::import))
+        // Slice 12b.2 — Digi-Key Order Status receive flow.
+        .route("/api/lookup/digikey/order-status", post(digikey::order_status))
+        .route("/api/lookup/digikey/order-receive", post(digikey::order_receive))
 }
