@@ -780,13 +780,33 @@
                     placeholder: "🔍 Scan / search IPN…",
                     width: 280,
                     on: {
-                        // Webix's search view fires onSearchIconClick on icon
-                        // press; pressing Enter triggers onEnter only on
-                        // some skins. Bind both for predictability.
-                        onEnter: function () { handleScan(this.getValue()); this.setValue(""); },
                         onSearchIconClick: function () { handleScan(this.getValue()); this.setValue(""); },
+                        // Webix's onEnter doesn't always fire when the
+                        // value contains URL chars or the input was
+                        // populated via a fast HID typing burst (barcode
+                        // scanner). Bind a DOM-level keydown on the
+                        // underlying <input> so Enter always triggers.
+                        onAfterRender: function () {
+                            const node = this.getInputNode && this.getInputNode();
+                            if (!node || node._pkScanBound) return;
+                            node._pkScanBound = true;
+                            // Capture the Webix view in a closure — `this`
+                            // inside addEventListener is the DOM element.
+                            const view = this;
+                            node.addEventListener("keydown", (ev) => {
+                                if (ev.key === "Enter" || ev.keyCode === 13) {
+                                    ev.preventDefault();
+                                    const v = view.getValue();
+                                    view.setValue("");
+                                    handleScan(v);
+                                }
+                            });
+                        },
                     },
                 },
+                { view: "button", value: "📷 Scan", width: 100,
+                  tooltip: "Open scan-capture overlay. Suppresses browser shortcuts (Alt+digit, Ctrl+T, ...) so HID scanners that emit control chars via Alt+digit don't trigger tab-switching.",
+                  click: () => openScanCaptureOverlay() },
                 { view: "button", value: "🖨 Label", width: 100, click: () => openLabelDialog({ template: "Custom" }) },
                 { view: "label", label: userHtml, width: 220 },
                 { view: "button", value: "Sign out", width: 100, click: doLogout },
@@ -794,44 +814,282 @@
         };
     }
 
+    /// Open a focused-capture overlay that intercepts every keydown
+    /// at the document level, suppresses browser shortcuts (Alt+digit
+    /// tab switching, Ctrl+T new tab, etc.), and reconstructs the
+    /// original scan payload — including non-printable chars that
+    /// Inateck/HID scanners emit via Alt+digit ASCII-codepoint
+    /// emulation (e.g., GS = Alt+0, Alt+2, Alt+9 → 0x1D).
+    ///
+    /// Idle timeout (250ms with no key) or Enter finalizes the buffer
+    /// and dispatches to handleScan. Esc or backdrop-click cancels.
+    ///
+    /// Why an overlay rather than a global always-on listener: we
+    /// need to preventDefault on EVERY key (otherwise Alt+1 still
+    /// switches tabs), which would block ordinary keyboard use of
+    /// the app. Scoping it to a visible overlay makes the trade-off
+    /// explicit to the operator and reversible.
+    function openScanCaptureOverlay() {
+        if ($$("pk-scan-capture")) return;
+        let buffer = "";
+        let keyEvents = 0;
+        let altDigitBuf = "";  // accumulating an Alt+digit triplet
+        let idleTimer = null;
+
+        function finalize() {
+            cleanup();
+            // Flush any half-built Alt+digit (rare; treat as plain digits).
+            const final = buffer + altDigitBuf;
+            if (final.trim()) handleScan(final);
+        }
+        function cancel() { cleanup(); }
+        function cleanup() {
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+            document.removeEventListener("keydown", onKey, true);
+            const ov = $$("pk-scan-capture");
+            if (ov) ov.destructor();
+        }
+        function bumpIdle() {
+            if (idleTimer) clearTimeout(idleTimer);
+            // 350ms idle = scan complete. Scanners type at >200 cps,
+            // so the burst finishes in well under that; 350ms is safe
+            // even for very long 2D codes.
+            idleTimer = setTimeout(finalize, 350);
+        }
+        function onKey(ev) {
+            // Capture-phase listener: stop everything from reaching the
+            // browser's chrome / focused widget.
+            ev.preventDefault();
+            ev.stopPropagation();
+            keyEvents++;
+            updateStatus();
+
+            if (ev.key === "Escape") { cancel(); return; }
+
+            // Alt+digit triplet: ASCII codepoint emulation. The OS
+            // doesn't render the resulting char on Linux, so we
+            // reconstruct it manually from the digit sequence.
+            if (ev.altKey && ev.key.length === 1 && /^\d$/.test(ev.key)) {
+                altDigitBuf += ev.key;
+                // Codepoints in this scheme are 1-3 decimal digits with
+                // leading zero(s). Three digits = complete (000-255 range).
+                if (altDigitBuf.length >= 3) {
+                    const cp = parseInt(altDigitBuf, 10);
+                    if (Number.isFinite(cp) && cp >= 0 && cp <= 255) {
+                        buffer += String.fromCharCode(cp);
+                    }
+                    altDigitBuf = "";
+                }
+                bumpIdle();
+                return;
+            }
+
+            // A non-Alt key arrived — flush any half-built triplet as
+            // plain digits (we likely misread the boundary).
+            if (altDigitBuf) {
+                buffer += altDigitBuf;
+                altDigitBuf = "";
+            }
+
+            if (ev.key === "Enter") { finalize(); return; }
+
+            if (ev.key.length === 1) {
+                buffer += ev.key;
+            }
+            // Non-printable plain keys (Tab, F-keys, etc.) ignored —
+            // they shouldn't appear in barcode payloads.
+
+            bumpIdle();
+        }
+        function updateStatus() {
+            const tpl = $$("pk-scan-capture-status");
+            if (tpl) tpl.setHTML(
+                `<div style="text-align:center;padding:24px">` +
+                `<div style="font-size:32px;margin-bottom:12px">📷</div>` +
+                `<div style="font-size:18px;color:#2a6fb0">Scanning…</div>` +
+                `<div style="font-size:13px;color:#6a7a8a;margin-top:8px">` +
+                `${keyEvents} key${keyEvents === 1 ? "" : "s"} captured · ` +
+                `${buffer.length} char${buffer.length === 1 ? "" : "s"} buffered` +
+                `</div>` +
+                `<div style="font-size:12px;color:#aab;margin-top:14px">` +
+                `Esc to cancel · auto-finalizes after 350ms idle</div>` +
+                `</div>`,
+            );
+        }
+
+        document.addEventListener("keydown", onKey, true);
+        webix.ui({
+            view: "window",
+            id: "pk-scan-capture",
+            modal: true,
+            position: "center",
+            width: 420, height: 220,
+            head: "Scan capture",
+            body: {
+                view: "template",
+                id: "pk-scan-capture-status",
+                borderless: true,
+                template: "<div style='text-align:center;padding:24px'>" +
+                    "<div style='font-size:32px;margin-bottom:12px'>📷</div>" +
+                    "<div style='font-size:18px;color:#2a6fb0'>Ready — scan now</div>" +
+                    "<div style='font-size:12px;color:#aab;margin-top:14px'>" +
+                    "Esc to cancel</div></div>",
+            },
+        }).show();
+    }
+
+    /// Some HID scanners (Inateck BCST-47 in default mode) emit
+    /// non-printable chars (GS, RS, EOT) as ESC + decimal-digits-of-
+    /// the-codepoint. Reverse that so the rest of the parser sees
+    /// proper control bytes. Pattern is `\x1b<d1>\x1b<d2>\x1b<d3>`
+    /// where d1..d3 form a decimal codepoint (e.g., \x1b 0 \x1b 2 \x1b 9
+    /// → \x1d, GS). A two-digit form (\x1b 0 \x1b 4 → \x04, EOT) and
+    /// a one-digit form are also possible; greedy-match longest first.
+    function decodeAltModeChars(s) {
+        // Replace longest first: 3-digit, 2-digit, 1-digit ESC sequences.
+        // Each ESC+digit means "next digit of the decimal codepoint".
+        return s
+            .replace(/\x1b(\d)\x1b(\d)\x1b(\d)/g, (_, a, b, c) =>
+                String.fromCharCode(parseInt(a + b + c, 10)))
+            .replace(/\x1b(\d)\x1b(\d)/g, (_, a, b) =>
+                String.fromCharCode(parseInt(a + b, 10)))
+            .replace(/\x1b(\d)/g, (_, a) =>
+                String.fromCharCode(parseInt(a, 10)));
+    }
+
+    /// Parse an ANSI MH10.8.2 / ECC200 barcode payload (the format
+    /// Digi-Key, Mouser, Newark, etc. all use on packing slips and
+    /// per-reel labels). Returns a flat object with the fields we
+    /// care about. Tolerates missing GS delimiters by walking the
+    /// known data-identifier prefixes; with GS present, splits cleanly
+    /// on GS first and parses each segment.
+    ///
+    /// Data identifier reference (subset we use):
+    ///   P    Customer item code (Digi-Key SKU)
+    ///   1P   Supplier item code (manufacturer P/N)
+    ///   30P  Additional item identification
+    ///   Q    Quantity
+    ///   K    Customer PO / order number
+    ///   1K   Sales order number  ← canonical SO# we attribute on
+    ///   10K  Invoice number
+    ///   11K  Document number
+    ///   9D   Date code
+    ///   1T   Lot code
+    ///   4L   Country of origin
+    function parseAnsiBarcode(payload) {
+        const out = {
+            digikey_pn: null, mpn: null, additional_pn: null,
+            quantity: null, customer_po: null, sales_order_number: null,
+            invoice_id: null, document_id: null, date_code: null,
+            lot_code: null, country_of_origin: null,
+        };
+        // Strip the format header. ANSI standard is "[)>RS06GS<fields>"
+        // but with stripped delimiters it'll be "[)>06<fields>".
+        let body = payload;
+        if (body.startsWith("[)>")) body = body.slice(3);
+        body = body.replace(/^\x1e?06\x1d?/, "");  // strip "[RS]06[GS]"
+        // Trim trailing terminator (RS EOT, optional).
+        body = body.replace(/\x1e?\x04?$/, "");
+
+        // Field segmentation: prefer GS-split when delimiters survive,
+        // otherwise walk identifier prefixes. ANSI identifiers are 1-3
+        // chars: digit-digit-letter, digit-letter, or just letter.
+        // Order: try longest match first.
+        const ids = ["30P","11K","10K", "1P","1K","1T", "4L","9D",
+                     "P","Q","K","Z"];
+        const segs = body.includes("\x1d")
+            ? body.split("\x1d").filter(Boolean)
+            : walkIdentifiers(body, ids);
+
+        for (const seg of segs) {
+            // Match the longest known prefix.
+            const id = ids.find((p) => seg.startsWith(p));
+            if (!id) continue;
+            const v = seg.slice(id.length);
+            switch (id) {
+                case "P":   out.digikey_pn = v; break;
+                case "1P":  out.mpn = v; break;
+                case "30P": out.additional_pn = v; break;
+                case "Q":   { const n = parseInt(v, 10); if (Number.isFinite(n) && n > 0) out.quantity = n; } break;
+                case "K":   out.customer_po = v; break;
+                case "1K":  out.sales_order_number = v; break;
+                case "10K": out.invoice_id = v; break;
+                case "11K": out.document_id = v; break;
+                case "9D":  out.date_code = v; break;
+                case "1T":  out.lot_code = v; break;
+                case "4L":  out.country_of_origin = v; break;
+                // "Z" (mutually defined) and unknown identifiers ignored.
+            }
+        }
+        return out;
+    }
+
+    /// Greedy walker for delimiter-stripped barcodes. Given the body
+    /// after the format header, slice it into logical segments by
+    /// finding the next identifier prefix. Skip the terminator zeros
+    /// run that DK sometimes pads with at the end.
+    function walkIdentifiers(body, ids) {
+        const out = [];
+        let i = 0;
+        while (i < body.length) {
+            // Sentinel: long zero run (DK pads with 60+ zeros) ends parse.
+            if (/^0{30,}$/.test(body.slice(i))) break;
+            // Find the next identifier prefix from position i.
+            let prefix = null;
+            for (const p of ids) {
+                if (body.startsWith(p, i)) { prefix = p; break; }
+            }
+            if (!prefix) { i++; continue; }
+            // Find where this segment ends: the start of the next
+            // identifier prefix.
+            const start = i + prefix.length;
+            let end = body.length;
+            for (let j = start; j < body.length; j++) {
+                for (const p of ids) {
+                    if (body.startsWith(p, j)) { end = j; break; }
+                }
+                if (end !== body.length) break;
+            }
+            out.push(body.slice(i, end));
+            i = end;
+        }
+        return out;
+    }
+
     /// Scan input dispatcher. Barcode scanners are HID keyboards that
     /// type the value followed by Enter, so this gets called on every
     /// scan as well as manual typing+Enter.
     ///
     /// Three payload kinds, dispatched in order:
-    ///  1. Our own QR labels: "<host>/#/part/<id>" → jump to part by id
-    ///  2. Distributor 2D codes (Digi-Key / Mouser): structured data
-    ///     with control-char delimiters → backend decode → stock-in
-    ///     or import (slice 13 follow-on; layered on once the Inateck
-    ///     scanner config is sorted)
-    ///  3. Plain text → existing IPN / name LIKE search
+    ///  1. Distributor 2D codes (Digi-Key / Mouser packing slips and
+    ///     per-reel labels): structured ANSI MH10.8.2 data → parse
+    ///     locally → match against PartDistributor → stock-in or import
+    ///  2. Our own QR labels: "<host>/#/part/<id>" → jump to part by id
+    ///  3. Plain text → existing IPN / MPN / SKU / name LIKE search
     async function handleScan(raw) {
         const value = (raw || "").trim();
         if (!value) return;
 
-        // Pattern 2: distributor 2D barcode. Detect by control-char
-        // markers (GS = 0x1D, RS = 0x1E) or the ANSI MH10.8 header
-        // "[)>". Send to the backend Digi-Key Barcode API and dispatch
-        // on the result. Mouser 2D codes use the same family of
-        // identifiers; for now we route them through the same DK
-        // endpoint — DK's parser tolerates a Mouser-format payload
-        // poorly, so this'll likely return "no match" on a Mouser
-        // packing slip and we'll add a Mouser-specific endpoint
-        // later if needed.
-        const looks2D = value.startsWith("[)>")
-            || /[]/.test(value);
-        if (looks2D) {
+        // Pattern 1: distributor 2D barcode. Detect by ANSI MH10.8.2
+        // header "[)>" with or without delimiters surviving the
+        // scanner's HID encoding. Inateck's default ALT-mode emits
+        // ESC+digits triplets in place of GS/RS — decodeAltModeChars
+        // reverses that. After decoding, parse data identifiers
+        // locally and match against PartDistributor via the existing
+        // search endpoint.
+        const decodedScan = decodeAltModeChars(value);
+        if (decodedScan.startsWith("[)>")) {
             try {
-                const decoded = await api.digikeyBarcode(value);
-                await dispatchBarcodeResult(decoded);
+                const fields = parseAnsiBarcode(decodedScan);
+                await dispatchAnsiBarcode(fields);
             } catch (e) {
-                console.error("barcode decode failed", e);
-                webix.message({ type: "error", text: "Barcode decode failed: " + (e.message || e) });
+                console.error("ansi barcode parse failed", e);
+                webix.message({ type: "error", text: "Barcode parse failed: " + (e.message || e) });
             }
             return;
         }
 
-        // Pattern 1: our own QR-code URL ("/#/part/<id>"). Match either
+        // Pattern 2: our own QR-code URL ("/#/part/<id>"). Match either
         // a full URL or just the hash fragment, since some scanners
         // strip the host portion (URL Mode quirk on Inateck etc.).
         const hashMatch = value.match(/(?:#\/)part\/(\d+)$/);
@@ -905,7 +1163,122 @@
         }
     }
 
-    /// After /api/lookup/digikey/barcode decodes a 2D scan, dispatch
+    /// Dispatch a locally-parsed ANSI MH10.8.2 barcode (the output of
+    /// parseAnsiBarcode). Uses the parts search endpoint (which now
+    /// LIKE-matches PartDistributor.orderNumber + PartManufacturer.partNumber)
+    /// to find the local part. Three-way dispatch: stock-in for matched +
+    /// qty, navigate for matched + no qty, import dialog for no match.
+    async function dispatchAnsiBarcode(fields) {
+        const sku = (fields.digikey_pn || "").trim();
+        const mpn = (fields.mpn || "").trim();
+        const so  = (fields.sales_order_number || fields.customer_po || "").trim();
+
+        // Local match: SKU first (distributor-qualified), MPN fallback.
+        let matched = null;
+        for (const probe of [sku, mpn]) {
+            if (!probe) continue;
+            const resp = await api.parts({ search: probe, limit: 5 });
+            if (resp.items && resp.items.length) { matched = resp.items[0]; break; }
+        }
+
+        if (matched) {
+            try {
+                if ($$("pk-left-tabbar")) $$("pk-left-tabbar").setValue("tab-categories");
+                const cell = $$("centerpane-grid");
+                if (cell) cell.show();
+                await loadParts({ search: "" });
+                const grid = $$("pk-parts-grid");
+                if (grid && grid.exists(matched.id)) {
+                    grid.select(matched.id); grid.showItem(matched.id);
+                }
+                await loadPartDetail(matched.id);
+            } catch (_) {}
+
+            if (fields.quantity && fields.quantity > 0) {
+                const tag = so ? ` from SO #${so}` : "";
+                webix.confirm({
+                    title: "Receive scanned line",
+                    text: `Add <b>+${fields.quantity}</b> to <b>${escapeHtml(matched.name || "")}</b>${tag}?`,
+                    ok: "Add stock", cancel: "Skip",
+                }).then(async (yes) => {
+                    if (!yes) return;
+                    try {
+                        const body = {
+                            stock_level: fields.quantity,
+                            comment: so ? `Digi-Key SO #${so} (scanned)` : "Barcode scan",
+                            correction: false,
+                        };
+                        if (so) {
+                            const dk = (lookupsCache && lookupsCache.distributors || [])
+                                .find((d) => (d.name || "").toLowerCase() === "digi-key");
+                            if (dk) { body.distributor_id = dk.id; body.sales_order_number = so; }
+                        }
+                        await api.addStockEntry(matched.id, body);
+                        await loadPartDetail(matched.id);
+                        webix.message({ type: "success", text: `+${fields.quantity} stocked` });
+                    } catch (e) {
+                        webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
+                    }
+                });
+            } else {
+                const bits = [];
+                if (fields.lot_code)  bits.push(`lot ${fields.lot_code}`);
+                if (fields.date_code) bits.push(`date ${fields.date_code}`);
+                if (fields.country_of_origin) bits.push(fields.country_of_origin);
+                webix.message({
+                    type: "success",
+                    text: `Found ${escapeHtml(matched.name || "")}` +
+                        (bits.length ? ` · ${bits.join(" · ")}` : ""),
+                });
+            }
+            return;
+        }
+
+        if (!sku && !mpn) {
+            webix.message({ type: "error", text: "Barcode parsed but no MPN/SKU recognized." });
+            return;
+        }
+        webix.message({
+            type: "info",
+            text: `Scanned ${sku || mpn} — not in inventory yet, opening import dialog.`,
+        });
+        openLookupSearchDialog({
+            prefillSource: "digikey",
+            prefillMpn: mpn || sku,
+            forceDistributorPn: sku,
+            onImported: async (resp) => {
+                try { await loadParts({ search: "" }); } catch (_) {}
+                if (fields.quantity && fields.quantity > 0 && resp && resp.part_id) {
+                    webix.confirm({
+                        title: "Receive scanned line",
+                        text: `Imported. Add <b>+${fields.quantity}</b> from SO #${so || "?"}?`,
+                        ok: "Add stock", cancel: "Skip",
+                    }).then(async (yes) => {
+                        if (!yes) return;
+                        try {
+                            const body = {
+                                stock_level: fields.quantity,
+                                comment: so ? `Digi-Key SO #${so} (scanned)` : "Barcode scan",
+                                correction: false,
+                            };
+                            if (so) {
+                                const dk = (lookupsCache && lookupsCache.distributors || [])
+                                    .find((d) => (d.name || "").toLowerCase() === "digi-key");
+                                if (dk) { body.distributor_id = dk.id; body.sales_order_number = so; }
+                            }
+                            await api.addStockEntry(resp.part_id, body);
+                            await loadPartDetail(resp.part_id);
+                            webix.message({ type: "success", text: `+${fields.quantity} stocked` });
+                        } catch (e) {
+                            webix.message({ type: "error", text: "Stock-in failed: " + (e.message || e) });
+                        }
+                    });
+                }
+            },
+        });
+    }
+
+    /// (Older) After /api/lookup/digikey/barcode decodes a 2D scan, dispatch
     /// based on whether we found a local match:
     ///  - matched + has quantity (PackList2D from a packing slip):
     ///      jump to part, prompt to add the qty to stock with SO#

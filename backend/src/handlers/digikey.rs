@@ -921,20 +921,46 @@ async fn fetch_barcode(
     payload: &str,
     kind: BarcodeKind,
 ) -> Result<DkBarcodeResponse, AppError> {
-    let base = format!("{}/Barcoding/v3/{}/", cfg.base_url, kind.endpoint());
-    let mut url = reqwest::Url::parse(&base)
-        .map_err(|e| AppError::Internal(format!("dk barcode url: {e}")))?;
-    url.path_segments_mut()
-        .map_err(|_| AppError::Internal("dk barcode url cannot-be-base".into()))?
-        .push(payload);
+    // Digi-Key's gateway is strict about what it accepts in the path
+    // — even chars the URL spec calls reserved-but-allowed (`[`, `]`,
+    // `(`, `)`, `>`) come back as "Invalid path". Match the
+    // unreserved-only encoding that working OSS clients
+    // (alvarop/dkbc) use: percent-encode every byte that isn't an
+    // RFC 3986 unreserved char.
+    let url = format!(
+        "{}/Barcoding/v3/{}/{}",
+        cfg.base_url, kind.endpoint(),
+        percent_encode_unreserved(payload),
+    );
+    // Barcode API: no customer-id header — that's an OrderStatus
+    // concept and including it returns 401 here.
     let body = digikey_request(
-        cfg, reqwest::Method::GET, url.as_str(), None, "barcode",
-        cfg.customer_id.as_deref(),
+        cfg, reqwest::Method::GET, &url, None, "barcode", None,
     ).await?;
     serde_json::from_str(&body).map_err(|e| AppError::Internal(format!(
         "digikey barcode parse: {e}: {}",
         body.chars().take(400).collect::<String>()
     )))
+}
+
+/// Percent-encode all bytes except RFC 3986 unreserved characters
+/// (A-Z, a-z, 0-9, '-', '_', '.', '~'). Matches Python's
+/// `urllib.parse.quote(s, safe='')`. Required for Digi-Key's
+/// barcode API gateway, which rejects bracket / paren / angle
+/// chars even if the URL spec considers them path-safe.
+fn percent_encode_unreserved(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "%{:02X}", b);
+            }
+        }
+    }
+    out
 }
 
 pub async fn process_barcode(
