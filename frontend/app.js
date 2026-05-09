@@ -6311,19 +6311,21 @@
             const rows = p.locations.map(l => {
                 return `<tr>
                     <td>${escapeHtml(l.form)}</td>
-                    <td>${escapeHtml(l.storage_location_name || "")}</td>
                     <td class="pk-numeric">${l.quantity}</td>
+                    <td>${escapeHtml(l.storage_location_name || "")}</td>
                 </tr>`;
             }).join("");
             const footer = `<tr style="font-weight:600;background:#f3f5f7">
-                <td colspan="2" style="text-align:right">Total:</td>
-                <td class="pk-numeric">${sum} <span style="font-weight:400">${driftHtml}</span></td>
+                <td style="text-align:right">Total:</td>
+                <td class="pk-numeric">${sum}</td>
+                <td>${driftHtml}</td>
             </tr>`;
             sections.push(detailSectionHtml(`Packaging (${p.locations.length})`,
                 `<table class="pk-detail-table">
                     <thead><tr>
-                        <th>Form</th><th>Where</th>
+                        <th>Form</th>
                         <th class="pk-numeric">Qty</th>
+                        <th>Where</th>
                     </tr></thead>
                     <tbody>${rows}${footer}</tbody>
                 </table>`));
@@ -7681,6 +7683,8 @@
                                                     editor: "richselect",
                                                     options: formOptions,
                                                 },
+                                                { id: "quantity", header: { text: "Qty", css: "pk-th-numeric" },
+                                                  width: 80, css: "pk-numeric", editor: "text" },
                                                 {
                                                     id: "storage_location_id", header: "Where", fillspace: true,
                                                     editor: "richselect",
@@ -7691,10 +7695,11 @@
                                                         return name ? escapeHtml(name) : "";
                                                     },
                                                 },
-                                                { id: "quantity", header: { text: "Qty", css: "pk-th-numeric" },
-                                                  width: 80, css: "pk-numeric", editor: "text" },
-                                                { id: "lot_number", header: "Lot", width: 130, editor: "text" },
-                                                { id: "comment", header: "Comment", width: 280, editor: "text" },
+                                                // lot_number + comment are still on the row data and saved by
+                                                // the scan-receive flow, but not editable from this grid —
+                                                // keeps the row tight. The detail panel doesn't show them
+                                                // either; full traceability lives on the StockEntry / Receipts
+                                                // history.
                                             ],
                                         },
                                     ],
