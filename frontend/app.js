@@ -4130,72 +4130,139 @@
         lbl.refresh();
     }
 
-    /// Popup-based multi-select for footprints (replacement for
-    /// `multicombo` which is Pro-only). Shows a scrollable list of
-    /// every footprint with multi-select checkboxes. Pre-selects
-    /// whatever's already in `selectedFootprintIds`. Click outside
-    /// the popup to close — selection auto-commits via the list's
-    /// select-change event.
+    /// Shuttle-list (dual-list) multi-select for footprints. Left
+    /// pane lists "Available" (everything not yet picked, filterable);
+    /// right pane lists "Selected" (the OR-clause that the search
+    /// will use). Click on the left → moves to right. Click on right
+    /// → moves back to left.
+    ///
+    /// Why shuttle instead of inline multi-select: makes the OR-list
+    /// explicit and visible at a glance. Webix Standard's `select:
+    /// "multiselect"` works but the visual feedback is just row
+    /// highlighting, which doesn't read as "OR" to the operator.
     function openFootprintPickerPopup(anchorBtn) {
         const old = $$("pk-fp-popup");
         if (old) old.destructor();
 
         const fps = (lookupsCache && lookupsCache.footprints) || [];
-        const data = fps.map((f) => ({ id: f.id, value: f.name }));
+        const allItems = fps.map((f) => ({ id: f.id, value: f.name }));
+        const selectedSet = new Set(selectedFootprintIds);
+        const availableData = allItems.filter((it) => !selectedSet.has(it.id));
+        const selectedData  = allItems.filter((it) =>  selectedSet.has(it.id));
+
+        function syncToModule() {
+            const lst = $$("pk-fp-selected");
+            if (!lst) return;
+            const ids = [];
+            lst.data.each((it) => { if (it && it.id) ids.push(it.id); });
+            selectedFootprintIds = ids;
+            refreshParametricFpLabel();
+            // Update the count headers on each side.
+            const avail = $$("pk-fp-available");
+            const aHdr = $$("pk-fp-avail-hdr");
+            const sHdr = $$("pk-fp-sel-hdr");
+            if (avail && aHdr) aHdr.define("label", `Available (${avail.count()})`);
+            if (lst && sHdr)   sHdr.define("label", `Selected (${lst.count()})`);
+            if (aHdr) aHdr.refresh();
+            if (sHdr) sHdr.refresh();
+        }
+
+        function moveItem(fromListId, toListId, itemId) {
+            const from = $$(fromListId);
+            const to   = $$(toListId);
+            if (!from || !to) return;
+            const item = from.getItem(itemId);
+            if (!item) return;
+            from.remove(itemId);
+            to.add({ id: item.id, value: item.value });
+            syncToModule();
+        }
 
         const popup = webix.ui({
             view: "popup",
             id: "pk-fp-popup",
-            width: 280,
-            height: 320,
+            width: 560,
+            height: 380,
             body: {
                 rows: [
                     {
-                        view: "search",
-                        id: "pk-fp-search",
-                        placeholder: "Filter footprints…",
-                        on: {
-                            onTimedKeyPress: function () {
-                                const list = $$("pk-fp-list");
-                                if (!list) return;
-                                const q = (this.getValue() || "").toLowerCase();
-                                list.filter((item) =>
-                                    !q || (item.value || "").toLowerCase().indexOf(q) !== -1);
+                        cols: [
+                            // ── Available (left) ──
+                            {
+                                width: 270,
+                                rows: [
+                                    { view: "label", id: "pk-fp-avail-hdr",
+                                      label: `Available (${availableData.length})`,
+                                      css: "pk-pane-title" },
+                                    {
+                                        view: "search",
+                                        id: "pk-fp-search",
+                                        placeholder: "Filter…",
+                                        on: {
+                                            onTimedKeyPress: function () {
+                                                const list = $$("pk-fp-available");
+                                                if (!list) return;
+                                                const q = (this.getValue() || "").toLowerCase();
+                                                list.filter((item) =>
+                                                    !q || (item.value || "").toLowerCase().indexOf(q) !== -1);
+                                            },
+                                        },
+                                    },
+                                    {
+                                        view: "list",
+                                        id: "pk-fp-available",
+                                        select: false,
+                                        template: "#value#",
+                                        data: availableData,
+                                        scroll: "y",
+                                        on: {
+                                            onItemClick: function (id) {
+                                                moveItem("pk-fp-available", "pk-fp-selected", id);
+                                            },
+                                        },
+                                    },
+                                ],
                             },
-                        },
-                    },
-                    {
-                        view: "list",
-                        id: "pk-fp-list",
-                        select: "multiselect",       // GPL-supported
-                        template: "#value#",
-                        data: data,
-                        scroll: "y",
-                        on: {
-                            onSelectChange: function () {
-                                const ids = this.getSelectedId(true);
-                                // getSelectedId(true) returns array of ids
-                                // (or empty array). Webix sometimes hands a
-                                // string when only one is selected in pre-
-                                // 11 versions; guard the type.
-                                selectedFootprintIds = Array.isArray(ids)
-                                    ? ids.map((n) => parseInt(n, 10)).filter(Boolean)
-                                    : (ids ? [parseInt(ids, 10)] : []);
-                                refreshParametricFpLabel();
+                            // ── Selected (right) ──
+                            {
+                                width: 270,
+                                rows: [
+                                    { view: "label", id: "pk-fp-sel-hdr",
+                                      label: `Selected (${selectedData.length})`,
+                                      css: "pk-pane-title" },
+                                    { height: 36, view: "label", label: '<span class="pk-help-hint">Click to remove from OR-list</span>' },
+                                    {
+                                        view: "list",
+                                        id: "pk-fp-selected",
+                                        select: false,
+                                        template: "#value#",
+                                        data: selectedData,
+                                        scroll: "y",
+                                        on: {
+                                            onItemClick: function (id) {
+                                                moveItem("pk-fp-selected", "pk-fp-available", id);
+                                            },
+                                        },
+                                    },
+                                ],
                             },
-                        },
+                        ],
                     },
                     {
                         view: "toolbar",
                         cols: [
-                            {},
-                            { view: "button", value: "Clear", width: 80,
+                            { view: "button", value: "Clear all", width: 100,
                               click: () => {
-                                  $$("pk-fp-list").unselectAll();
-                                  selectedFootprintIds = [];
-                                  refreshParametricFpLabel();
+                                  // Move every selected item back to Available.
+                                  const sel = $$("pk-fp-selected");
+                                  const avail = $$("pk-fp-available");
+                                  if (!sel || !avail) return;
+                                  const ids = [];
+                                  sel.data.each((it) => { if (it && it.id) ids.push(it.id); });
+                                  ids.forEach((id) => moveItem("pk-fp-selected", "pk-fp-available", id));
                               } },
-                            { view: "button", value: "Done", css: "webix_primary", width: 80,
+                            {},
+                            { view: "button", value: "Done", css: "webix_primary", width: 90,
                               click: () => $$("pk-fp-popup") && $$("pk-fp-popup").hide() },
                         ],
                     },
@@ -4203,13 +4270,6 @@
             },
         });
 
-        // Pre-select whatever was already picked.
-        const list = $$("pk-fp-list");
-        if (list) {
-            selectedFootprintIds.forEach((id) => {
-                if (list.exists(id)) list.select(id, true);
-            });
-        }
         if (anchorBtn && anchorBtn.$view) {
             popup.show(anchorBtn.$view);
         } else {
