@@ -6478,8 +6478,16 @@
     //  Stock dialog (add / remove / reconcile)
     // ============================================================
 
-    function openStockDialog(mode) {
+    async function openStockDialog(mode) {
         if (!currentPart) return;
+        // Make sure distributor / storage_location caches are loaded
+        // before we render — richselect popups won't have data
+        // otherwise.
+        try { await ensureLookups(); }
+        catch (e) {
+            webix.message({ type: "error", text: "Failed to load lookups: " + (e.message || e) });
+            return;
+        }
         const titles = { add: "Add stock", remove: "Remove stock", reconcile: "Reconcile stock" };
         const subtitle =
             `<div class="pk-dialog-subtitle">` +
@@ -6568,11 +6576,15 @@
                 labelWidth: 150, label: "",
                 on: {
                     onChange: function (newVal) {
+                        // disable rather than hide — webix richselect
+                        // popups don't always re-init cleanly after
+                        // hide()/show(), which would leave the storage
+                        // dropdown unresponsive.
                         ["pk-stock-form", "pk-stock-storage", "pk-stock-lot", "pk-stock-date"]
                             .forEach((id) => {
                                 const v = $$(id);
                                 if (!v) return;
-                                if (newVal) v.show(); else v.hide();
+                                if (newVal) v.enable(); else v.disable();
                             });
                     },
                 },
@@ -6580,27 +6592,25 @@
             const formOpts = SCAN_FORM_OPTIONS.slice();  // Reel/CutTape/Loose/...
             const storageOpts = (lookupsCache && lookupsCache.storage_locations || [])
                 .map((s) => ({ id: s.id, value: s.name }));
-            // Default storage = the part's primary storage_location_id
-            // when set; otherwise the first cached location.
             const defaultStorage = (currentPart.storage_location_id
                 && storageOpts.some((s) => s.id === currentPart.storage_location_id))
                 ? currentPart.storage_location_id
                 : (storageOpts[0] && storageOpts[0].id) || null;
             elements.push({
                 view: "richselect", id: "pk-stock-form", label: "Form", labelWidth: 150,
-                hidden: true, options: formOpts, value: "Loose",
+                disabled: true, options: formOpts, value: "Loose",
             });
             elements.push({
                 view: "richselect", id: "pk-stock-storage", label: "Storage", labelWidth: 150,
-                hidden: true, options: storageOpts, value: defaultStorage,
+                disabled: true, options: storageOpts, value: defaultStorage,
             });
             elements.push({
                 view: "text", id: "pk-stock-lot", label: "Lot", labelWidth: 150,
-                hidden: true, value: "",
+                disabled: true, value: "",
             });
             elements.push({
                 view: "text", id: "pk-stock-date", label: "Date code", labelWidth: 150,
-                hidden: true, value: "",
+                disabled: true, value: "",
             });
         }
 
@@ -6799,6 +6809,124 @@
     /// Live-recompute the Locations tab status label: "Total: N" with
     /// a colored chip when the sum drifts from Part.stockLevel. Called
     /// on every onAfterEditStop / onAfterAdd / row removal.
+    /// "Split / move" dialog for the part editor's Containers tab.
+    /// Pulls N pcs out of the selected row and inserts a new row with
+    /// the chosen Form / Storage / Lot. Net stock unchanged — this is
+    /// a re-labeling, not a stock event. Operator's typical workflow:
+    ///   - "100 pcs show as loose but they're actually on a reel"
+    ///     → split N=100 from Loose row into a new Reel row.
+    ///   - "1200 pcs total, just moved 1000 onto a reel"
+    ///     → split N=1000 from the Loose row, leaving 200 behind.
+    /// Saves on the part editor's Save button (we don't write to the
+    /// DB here — the operator can still cancel everything via the
+    /// dialog's Cancel).
+    function openSplitContainerDialog(seed, formOptions, storageOptions) {
+        const grid = $$("pk-edit-locations");
+        if (!grid) return;
+        const sel = grid.getSelectedId();
+        if (!sel) {
+            webix.message({ type: "error", text: "Select a container row first." });
+            return;
+        }
+        const src = grid.getItem(sel);
+        const srcQty = parseInt(src.quantity, 10) || 0;
+        if (srcQty <= 0) {
+            webix.message({ type: "error", text: "Selected row has no quantity to move." });
+            return;
+        }
+
+        const winId = "pk-split-container-dialog";
+        if ($$(winId)) { $$(winId).destructor(); }
+
+        const srcFormLabel = src.form || "Loose";
+        const srcStorageLabel = (function () {
+            if (!src.storage_location_id) return "(unset)";
+            const m = (lookupsCache && lookupsCache.storage_locations || [])
+                .find((s) => s.id == src.storage_location_id);
+            return m ? m.name : `#${src.storage_location_id}`;
+        })();
+
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 480,
+            head: "Split / move container",
+            body: {
+                view: "form",
+                id: "pk-split-container-form",
+                elements: [
+                    {
+                        view: "template", borderless: true, height: 50,
+                        template:
+                            `<div style="padding:6px 4px">` +
+                            `<div style="font-size:13px;color:#6a7a8a">From:</div>` +
+                            `<div style="font-size:14px"><b>${escapeHtml(srcFormLabel)}</b> · ` +
+                            `${escapeHtml(srcStorageLabel)} · ` +
+                            `qty <b>${srcQty}</b>` +
+                            (src.lot_number ? ` · lot ${escapeHtml(src.lot_number)}` : "") +
+                            `</div></div>`,
+                    },
+                    { view: "counter", name: "qty", label: "Move quantity", labelWidth: 130,
+                      min: 1, max: srcQty, step: 1, value: srcQty },
+                    { view: "richselect", name: "form", label: "Into form", labelWidth: 130,
+                      options: formOptions, value: src.form === "Reel" ? "Loose" : "Reel" },
+                    { view: "richselect", name: "storage_location_id", label: "Into storage", labelWidth: 130,
+                      options: storageOptions, value: src.storage_location_id || null },
+                    { view: "text", name: "lot_number", label: "Lot", labelWidth: 130,
+                      value: src.lot_number || "" },
+                    { view: "text", name: "comment", label: "Comment", labelWidth: 130,
+                      value: "" },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100,
+                              click: () => $$(winId) && $$(winId).destructor() },
+                            { view: "button", value: "✓ Split", css: "pk-btn-add", width: 110,
+                              hotkey: "enter",
+                              click: () => doSplit() },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        function doSplit() {
+            const v = $$("pk-split-container-form").getValues();
+            const n = parseInt(v.qty, 10);
+            if (!Number.isFinite(n) || n <= 0 || n > srcQty) {
+                webix.message({ type: "error", text: `Quantity must be 1..${srcQty}.` });
+                return;
+            }
+            if (!v.storage_location_id) {
+                webix.message({ type: "error", text: "Pick a storage location." });
+                return;
+            }
+            // 1. Subtract from source row (or remove entirely when N == srcQty).
+            const remaining = srcQty - n;
+            if (remaining === 0) {
+                grid.remove(sel);
+            } else {
+                grid.updateItem(sel, { quantity: remaining });
+            }
+            // 2. Add a new row with the moved quantity.
+            const newRow = {
+                id: webix.uid(),
+                form: v.form || "Loose",
+                storage_location_id: parseInt(v.storage_location_id, 10) || null,
+                quantity: n,
+                lot_number: (v.lot_number || "").trim(),
+                comment: (v.comment || "").trim(),
+            };
+            grid.add(newRow);
+            grid.select(newRow.id);
+            updateLocationsTotal(seed);
+            $$(winId) && $$(winId).destructor();
+            webix.message({ type: "success", text: `Moved ${n} into ${newRow.form}` });
+        }
+    }
+
     function updateLocationsTotal(seed) {
         const grid = $$("pk-edit-locations");
         const status = $$("pk-edit-locations-status");
@@ -7513,6 +7641,9 @@
                                             cols: [
                                                 { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100,
                                                   click: () => editorAddRow("pk-edit-locations", { form: "Loose", quantity: "0" }) },
+                                                { view: "button", value: "⇄ Split / move", width: 130,
+                                                  tooltip: "Take N pcs out of the selected container and move them into a new container with a different form (e.g., 1000 pcs from Loose → Reel). Total stock is unchanged.",
+                                                  click: () => openSplitContainerDialog(seed, formOptions, storageOptions) },
                                                 { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160,
                                                   click: () => { editorRemoveRow("pk-edit-locations"); updateLocationsTotal(seed); } },
                                                 {},
