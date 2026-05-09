@@ -797,6 +797,7 @@ pub async fn run_project(
                 false,
                 user.user_id,
                 stock::OrderAttribution::default(),
+                None, // BOM consume doesn't yet pick a PSL row (slice-13c follow-on)
             )
             .await
             .map_err(|e| match e {
@@ -931,6 +932,7 @@ pub async fn delete_run(
                         false,
                         user.user_id,
                         stock::OrderAttribution::default(),
+                        None, // run-deletion restore doesn't re-target a specific PSL row
                     )
                     .await?;
                 }

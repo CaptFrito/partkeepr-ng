@@ -844,6 +844,36 @@
         { id: "Other",   value: "Other" },
     ];
 
+    /// Slice 13c: when consuming stock from a part with multiple
+    /// PartStorageLocation rows, default-pick by form priority — draw
+    /// from already-broken-into stock first so unbroken reels stay
+    /// intact for the next quantity-discount order. Lower index =
+    /// higher priority (preferred to consume from).
+    const FORM_CONSUME_PRIORITY = [
+        "Loose", "CutTape", "Bag", "Tray", "Tube", "Reel", "Feeder", "Other",
+    ];
+
+    function formConsumeRank(form) {
+        const i = FORM_CONSUME_PRIORITY.indexOf(form || "Loose");
+        return i < 0 ? 999 : i;
+    }
+
+    /// Pick the row to default-target for a consume. Skips zero-qty
+    /// rows; among the rest, lowest form-rank wins. Ties broken by
+    /// quantity descending (consume from the largest broken-into row
+    /// first), then row id ascending.
+    function preferredConsumeRow(rows) {
+        const eligible = (rows || []).filter((r) => (r.quantity || 0) > 0);
+        if (!eligible.length) return null;
+        eligible.sort((a, b) => {
+            const ra = formConsumeRank(a.form), rb = formConsumeRank(b.form);
+            if (ra !== rb) return ra - rb;
+            if ((b.quantity || 0) !== (a.quantity || 0)) return (b.quantity || 0) - (a.quantity || 0);
+            return (a.id || 0) - (b.id || 0);
+        });
+        return eligible[0];
+    }
+
     /// Reusable scan-receive dialog. Lands a stock-in **and** creates
     /// a fresh PartStorageLocation row representing the physical
     /// container that arrived (a reel, a cut-tape strip, ...). Per
@@ -6120,6 +6150,15 @@
                         jumpToProject(pid);
                     });
                 });
+                // Slice 13c: per-row consume buttons in the Packaging section.
+                root.querySelectorAll('button.pk-consume-btn[data-psl-id]').forEach((btn) => {
+                    btn.addEventListener("click", (ev) => {
+                        ev.preventDefault();
+                        const pslId = parseInt(btn.dataset.pslId, 10);
+                        const row = (currentPart.locations || []).find((l) => l.id === pslId);
+                        if (row) openConsumeContainerDialog(currentPart, row);
+                    });
+                });
             }
         } catch (e) {
             console.error(e);
@@ -6805,16 +6844,21 @@
                 ? `<span class="pk-stock-add">matches stock level</span>`
                 : `<span class="pk-stock-remove">⚠ stock level = ${p.stock_level} (off by ${sum - p.stock_level >= 0 ? "+" : ""}${sum - p.stock_level})</span>`;
             const rows = p.locations.map(l => {
+                const consumeBtn = (l.quantity || 0) > 0
+                    ? `<button class="pk-btn-remove pk-consume-btn" data-psl-id="${l.id}" title="Consume from this packaging">🔻</button>`
+                    : `<span class="pk-help-hint">empty</span>`;
                 return `<tr>
                     <td>${escapeHtml(l.form)}</td>
                     <td class="pk-numeric">${l.quantity}</td>
                     <td>${escapeHtml(l.storage_location_name || "")}</td>
+                    <td>${consumeBtn}</td>
                 </tr>`;
             }).join("");
             const footer = `<tr style="font-weight:600;background:#f3f5f7">
                 <td style="text-align:right">Total:</td>
                 <td class="pk-numeric">${sum}</td>
                 <td>${driftHtml}</td>
+                <td></td>
             </tr>`;
             sections.push(detailSectionHtml(`Packaging (${p.locations.length})`,
                 `<table class="pk-detail-table">
@@ -6822,6 +6866,7 @@
                         <th>Form</th>
                         <th class="pk-numeric">Qty</th>
                         <th>Where</th>
+                        <th></th>
                     </tr></thead>
                     <tbody>${rows}${footer}</tbody>
                 </table>`));
@@ -7430,6 +7475,95 @@
             updateLocationsTotal(seed);
             $$(winId) && $$(winId).destructor();
             webix.message({ type: "success", text: `Moved ${n} into ${newRow.form}` });
+        }
+    }
+
+    /// Slice 13c: consume N units from a specific PartStorageLocation
+    /// row. Posts a negative-delta StockEntry with `part_storage_location_id`
+    /// set, which the backend uses to (a) decrement that PSL row's
+    /// quantity in the same transaction and (b) record traceability on
+    /// the StockEntry itself. Per the user's "warn-and-allow" memory,
+    /// over-consumption (qty > row.quantity) is permitted with a warning
+    /// — the operator may be reconciling against an actually-empty reel.
+    function openConsumeContainerDialog(part, row) {
+        if (!part || !row) return;
+        const winId = "pk-consume-container-dialog";
+        if ($$(winId)) { $$(winId).destructor(); }
+        const formLabel = row.form || "Loose";
+        const storageLabel = row.storage_location_name || "(unset)";
+        const onHand = row.quantity || 0;
+        const lotBit = row.lot_number ? ` · lot ${escapeHtml(row.lot_number)}` : "";
+        webix.ui({
+            view: "window",
+            id: winId,
+            modal: true,
+            position: "center",
+            width: 460,
+            head: `Consume from ${formLabel}`,
+            body: {
+                view: "form",
+                id: "pk-consume-container-form",
+                elements: [
+                    {
+                        view: "template", borderless: true, height: 60,
+                        template:
+                            `<div style="padding:6px 4px">` +
+                            `<div class="pk-dialog-part-name">${escapeHtml(part.name)}</div>` +
+                            `<div class="pk-dialog-subtitle">` +
+                            `<b>${escapeHtml(formLabel)}</b> · ${escapeHtml(storageLabel)} · ` +
+                            `on hand <b>${onHand}</b>${lotBit}` +
+                            `</div></div>`,
+                    },
+                    { view: "counter", name: "qty", label: "Consume quantity", labelWidth: 150,
+                      min: 1, value: 1, step: 1 },
+                    { view: "textarea", name: "comment", label: "Comment", labelWidth: 150, height: 60 },
+                    {
+                        cols: [
+                            {},
+                            { view: "button", value: "Cancel", width: 100,
+                              click: () => $$(winId) && $$(winId).destructor() },
+                            { view: "button", value: "🔻 Consume", css: "pk-btn-remove", width: 130,
+                              hotkey: "enter",
+                              click: () => doConsume() },
+                        ],
+                    },
+                ],
+            },
+        }).show();
+
+        async function doConsume() {
+            const v = $$("pk-consume-container-form").getValues();
+            const n = parseInt(v.qty, 10);
+            if (!Number.isFinite(n) || n <= 0) {
+                webix.message({ type: "error", text: "Quantity must be at least 1." });
+                return;
+            }
+            if (n > onHand) {
+                // Warn-and-allow: operator may be reconciling against
+                // an actually-empty reel. Persist anyway.
+                webix.message({ type: "warning",
+                    text: `Consuming ${n} from a row holding ${onHand} — quantity will go negative.` });
+            }
+            try {
+                await api.addStockEntry(part.id, {
+                    stock_level: -n,
+                    comment: (v.comment || "").trim() || null,
+                    correction: false,
+                    part_storage_location_id: row.id,
+                });
+                $$(winId) && $$(winId).destructor();
+                await loadPartDetail(part.id);
+                await loadParts({});
+                const grid = $$("pk-parts-grid");
+                if (grid && grid.exists(part.id)) {
+                    grid.select(part.id);
+                    grid.showItem(part.id);
+                }
+                webix.message({ type: "success", text: `Consumed ${n} from ${formLabel}` });
+            } catch (e) {
+                console.error(e);
+                webix.message({ type: "error", text: "Consume failed: " + (e.message || e) });
+            }
         }
     }
 

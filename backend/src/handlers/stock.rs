@@ -59,6 +59,15 @@ pub struct StockChange {
     pub lot_number: Option<String>,
     #[serde(default)]
     pub date_code: Option<String>,
+    /// Slice 13c: tie this StockEntry to a specific PartStorageLocation
+    /// row. Adds (positive delta) targeting an existing row → that
+    /// row's quantity increments. Removes (negative delta) → that
+    /// row's quantity decrements. Mutually exclusive with
+    /// `create_storage_row`: that flag mints a fresh row, this points
+    /// at an existing one. Both NULL = pre-13c untracked entry (the
+    /// auto-Loose-row fallback still kicks in for first-add cases).
+    #[serde(default)]
+    pub part_storage_location_id: Option<i32>,
 }
 
 pub async fn create_stock_entry(
@@ -69,6 +78,11 @@ pub async fn create_stock_entry(
 ) -> Result<Json<Part>, AppError> {
     if req.stock_level == 0 {
         return Err(AppError::BadRequest("stock_level cannot be zero"));
+    }
+    if req.create_storage_row && req.part_storage_location_id.is_some() {
+        return Err(AppError::BadRequest(
+            "create_storage_row and part_storage_location_id are mutually exclusive",
+        ));
     }
 
     // Only carry attribution when both fields are set — half-attributed
@@ -82,6 +96,50 @@ pub async fn create_stock_entry(
     };
 
     let mut tx = pool.begin().await?;
+
+    // Resolve which PartStorageLocation row this StockEntry references,
+    // *before* the StockEntry insert, so we can persist the FK on the
+    // entry itself. Three branches:
+    //
+    //  (a) `create_storage_row`     → mint a fresh PSL row for this receipt
+    //  (b) `part_storage_location_id` provided → use existing row (validated)
+    //  (c) positive delta + zero PSL rows  → auto-mint a Loose row (legacy
+    //                                        first-add fallback)
+    //  otherwise                    → no FK, untracked entry (legacy path)
+    let psl_id: Option<i32> = if req.create_storage_row && req.stock_level > 0 {
+        Some(insert_new_psl_row(&mut tx, part_id, &req, user.user_id).await?)
+    } else if let Some(pid) = req.part_storage_location_id {
+        let owner: Option<i32> = sqlx::query_scalar(
+            "SELECT part_id FROM PartStorageLocation WHERE id = ?",
+        )
+        .bind(pid)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match owner {
+            None => return Err(AppError::NotFound("part storage location")),
+            Some(p) if p != part_id => {
+                return Err(AppError::BadRequest(
+                    "part_storage_location_id belongs to a different part",
+                ));
+            }
+            Some(_) => Some(pid),
+        }
+    } else if req.stock_level > 0 {
+        let existing: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM PartStorageLocation WHERE part_id = ?",
+        )
+        .bind(part_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if existing == 0 {
+            Some(insert_new_psl_row(&mut tx, part_id, &req, user.user_id).await?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     apply_stock_change_in_tx(
         &mut tx,
         part_id,
@@ -91,59 +149,31 @@ pub async fn create_stock_entry(
         req.correction,
         user.user_id,
         attribution,
+        psl_id,
     )
     .await?;
 
-    // Optional: insert a PartStorageLocation row representing this
-    // physical container (a fresh reel, a cut-tape strip, a tube,
-    // ...). Only on positive deltas (a "received" event). Form must
-    // be one of the ENUM values; default Loose if missing.
-    // Auto-create a Loose row when this part has no Container rows
-    // yet — covers the case where existing stock was already there
-    // before the Containers feature was added (or wasn't auto-
-    // backfilled by the migration). Skips when the operator
-    // explicitly opted into a different form via create_storage_row.
-    let want_storage_row = req.create_storage_row || (req.stock_level > 0 && {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM PartStorageLocation WHERE part_id = ?",
-        )
-        .bind(part_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        count == 0
-    });
-
-    if want_storage_row && req.stock_level > 0 {
-        // storage_location_id is nullable now; "(unbinned)" is allowed.
-        let storage_location_id = req.storage_location_id;
-        let form = req.form.as_deref().unwrap_or("Loose");
-        // Build the row's comment from lot/date + operator note, since
-        // the schema has no dedicated date_code column. Lives on the
-        // PartStorageLocation row for traceability ("which reel was
-        // this from?").
-        let mut bits: Vec<String> = Vec::new();
-        if let Some(d) = req.date_code.as_deref().filter(|s| !s.trim().is_empty()) {
-            bits.push(format!("date {}", d));
+    // Auto-update the referenced container's quantity by the delta.
+    // For an "add to existing row" the PSL row was minted before the
+    // StockEntry insert with quantity=stock_level baked in (see
+    // insert_new_psl_row), so skip the bump in that case to avoid
+    // double-counting. For "consume from existing row" or "add to
+    // existing row by id" the bump applies.
+    if let Some(pid) = psl_id {
+        let already_baked = req.create_storage_row
+            || (req.stock_level > 0 && req.part_storage_location_id.is_none());
+        if !already_baked {
+            sqlx::query(
+                "UPDATE PartStorageLocation \
+                 SET quantity = quantity + ?, lastModified = NOW(), user_id = ? \
+                 WHERE id = ?",
+            )
+            .bind(req.stock_level)
+            .bind(user.user_id)
+            .bind(pid)
+            .execute(&mut *tx)
+            .await?;
         }
-        if let Some(c) = req.comment.as_deref().filter(|s| !s.trim().is_empty()) {
-            bits.push(c.to_string());
-        }
-        let comment_str = bits.join(" · ");
-        sqlx::query(
-            "INSERT INTO PartStorageLocation \
-                (part_id, storageLocation_id, form, quantity, lotNumber, comment, \
-                 user_id, created, lastModified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
-        )
-        .bind(part_id)
-        .bind(storage_location_id)
-        .bind(form)
-        .bind(req.stock_level)
-        .bind(req.lot_number.as_deref())
-        .bind(if comment_str.is_empty() { None } else { Some(comment_str.as_str()) })
-        .bind(user.user_id)
-        .execute(&mut *tx)
-        .await?;
     }
 
     let updated: Part = sqlx::query_as("SELECT * FROM Part WHERE id = ?")
@@ -152,6 +182,43 @@ pub async fn create_stock_entry(
         .await?;
     tx.commit().await?;
     Ok(Json(updated))
+}
+
+/// Insert a fresh PartStorageLocation row for a positive-delta receipt.
+/// Returns the new row's id so the caller can persist it on the
+/// StockEntry as the per-entry container FK.
+async fn insert_new_psl_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    part_id: i32,
+    req: &StockChange,
+    user_id: i32,
+) -> Result<i32, AppError> {
+    let storage_location_id = req.storage_location_id;
+    let form = req.form.as_deref().unwrap_or("Loose");
+    let mut bits: Vec<String> = Vec::new();
+    if let Some(d) = req.date_code.as_deref().filter(|s| !s.trim().is_empty()) {
+        bits.push(format!("date {}", d));
+    }
+    if let Some(c) = req.comment.as_deref().filter(|s| !s.trim().is_empty()) {
+        bits.push(c.to_string());
+    }
+    let comment_str = bits.join(" · ");
+    let res = sqlx::query(
+        "INSERT INTO PartStorageLocation \
+            (part_id, storageLocation_id, form, quantity, lotNumber, comment, \
+             user_id, created, lastModified) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+    )
+    .bind(part_id)
+    .bind(storage_location_id)
+    .bind(form)
+    .bind(req.stock_level)
+    .bind(req.lot_number.as_deref())
+    .bind(if comment_str.is_empty() { None } else { Some(comment_str.as_str()) })
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(res.last_insert_id() as i32)
 }
 
 /// Per-entry order attribution. Optional — only populated by the
@@ -185,6 +252,7 @@ pub async fn apply_stock_change_in_tx(
     correction: bool,
     user_id: i32,
     attribution: OrderAttribution<'_>,
+    part_storage_location_id: Option<i32>,
 ) -> Result<(i32, bool), AppError> {
     if delta == 0 {
         return Err(AppError::BadRequest("stock delta cannot be zero"));
@@ -202,8 +270,8 @@ pub async fn apply_stock_change_in_tx(
     sqlx::query(
         "INSERT INTO StockEntry \
             (part_id, user_id, stockLevel, price, dateTime, correction, comment, \
-             distributor_id, salesOrderNumber) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             distributor_id, salesOrderNumber, partStorageLocation_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(part_id)
     .bind(user_id)
@@ -214,6 +282,7 @@ pub async fn apply_stock_change_in_tx(
     .bind(comment)
     .bind(attribution.distributor_id)
     .bind(attribution.sales_order_number)
+    .bind(part_storage_location_id)
     .execute(&mut **tx)
     .await?;
 

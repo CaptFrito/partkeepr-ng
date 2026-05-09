@@ -764,6 +764,7 @@ pub async fn order_receive(
                 distributor_id: Some(dk_id),
                 sales_order_number: Some(&so_str),
             },
+            None, // order-receive doesn't auto-mint PSL rows; scan-receive does
         ).await?;
         results.push(OrderReceiveResult {
             part_id: line.part_id,

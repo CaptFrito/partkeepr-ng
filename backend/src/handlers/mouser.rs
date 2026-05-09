@@ -627,6 +627,7 @@ pub async fn order_receive(
                 distributor_id: Some(mouser_id),
                 sales_order_number: Some(&so_str),
             },
+            None, // order-receive doesn't auto-mint PSL rows
         ).await?;
         results.push(MouserOrderReceiveResult {
             part_id: line.part_id,

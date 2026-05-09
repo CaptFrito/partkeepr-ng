@@ -228,6 +228,21 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Slice 13c: per-row Consume button in the Packaging detail panel.
+   Styled inline (not via the .pk-btn-remove wrapper class) since it
+   sits inside a plain HTML <table>, not a Webix toolbar. */
+button.pk-consume-btn {
+    background: #b03030;
+    color: #fff;
+    border: 1px solid #8c2424;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+}
+button.pk-consume-btn:hover { background: #8c2424; }
+
 .pk-stock-add { color: #1e7e34; font-weight: 600; }
 .pk-stock-remove { color: #b03030; font-weight: 600; }
 
