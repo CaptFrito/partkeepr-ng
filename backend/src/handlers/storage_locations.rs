@@ -396,6 +396,27 @@ pub async fn loc_delete(
     State(pool): State<MySqlPool>,
     Path(id): Path<i32>,
 ) -> Result<StatusCode, AppError> {
+    // Hard-block delete of the convention bin. It's the system-wide
+    // default for not-yet-placed parts and the startup invariant
+    // re-creates it anyway — refusing here keeps the UI honest.
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM StorageLocation WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?;
+    if let Some(n) = name.as_deref() {
+        if n == crate::startup::NOWHERE_LOCATION_NAME {
+            return Err(AppError::Conflict(json!({
+                "error": format!(
+                    "{} is the system default 'not yet placed' bin and can't be removed",
+                    n,
+                ),
+                "protected": true,
+            })));
+        }
+    }
+
     // Hard-block if any Part references this storage location. The FK
     // would block too (with a 1451 error), but checking up front gives
     // the UI a clean count and an unambiguous error shape.

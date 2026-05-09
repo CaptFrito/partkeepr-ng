@@ -12,6 +12,7 @@ use tracing_subscriber::EnvFilter;
 mod error;
 mod handlers;
 mod models;
+mod startup;
 
 use handlers::auth::SessionSigner;
 use handlers::storage::StorageConfig;
@@ -73,6 +74,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("connecting to database")?;
     tracing::info!("connected to database");
+
+    // Startup invariants — schema sanity + seed rows that the app
+    // assumes exist. See backend/src/startup.rs for the list.
+    startup::ensure_invariants(&pool).await?;
 
     let store = StorageConfig::from_env_and_init().await?;
     let signer = SessionSigner::from_env()?;
