@@ -36,11 +36,16 @@
             if (!r.ok) throw new Error(`category tree failed: ${r.status}`);
             return r.json();
         },
-        async parts({ filter, search, byField, predicates, limit = 500, offset = 0 } = {}) {
-            // When predicates are set, switch to the parametric search
-            // endpoint — same filter shape carried in the body.
-            if (predicates && predicates.length) {
-                const body = { predicates, limit, offset };
+        async parts({ filter, search, byField, predicates, footprint_ids, limit = 500, offset = 0 } = {}) {
+            // Switch to the parametric endpoint when predicates OR a
+            // footprint multi-select is set. Footprint-only search is
+            // a valid use case (e.g., "find every 0805 part regardless
+            // of value") so we don't require predicates.length > 0.
+            const hasPreds = predicates && predicates.length;
+            const hasFps = footprint_ids && footprint_ids.length;
+            if (hasPreds || hasFps) {
+                const body = { predicates: predicates || [], limit, offset };
+                if (hasFps) body.footprint_ids = footprint_ids;
                 if (filter && filter.kind && filter.id != null) body[filter.kind] = filter.id;
                 if (search) body.search = search;
                 if (byField) Object.assign(body, byField);
@@ -4097,7 +4102,7 @@
     // pane (stock_mode, meta_only, distributor_id, price_min/max).
     // predicates holds the parametric-pane predicates (W9). When set,
     // the parts grid is populated from /api/parts/parametric instead.
-    let currentParts = { filter: null, search: "", byField: {}, predicates: [] };
+    let currentParts = { filter: null, search: "", byField: {}, predicates: [], footprint_ids: [] };
 
     function buildCenterPane() {
         return {
@@ -4212,8 +4217,15 @@
                                 onChange: function (newVal) {
                                     const pane = $$("pk-parametric-pane");
                                     if (!pane) return;
-                                    if (newVal) pane.show();
-                                    else pane.hide();
+                                    if (newVal) {
+                                        pane.show();
+                                        // Populate parameter-name combo + SI prefix /
+                                        // unit options + footprint multi-select. No-op
+                                        // if already loaded.
+                                        ensureParametricLookupsReady();
+                                    } else {
+                                        pane.hide();
+                                    }
                                 },
                             },
                         },
@@ -4301,6 +4313,42 @@
                     css: "pk-filters-pane",
                     hidden: true,
                     rows: [
+                        // Footprint filter row — multi-select, gated by
+                        // a checkbox so it stays out of the way for
+                        // operators searching purely on parameters or
+                        // text. Sits above the predicates grid so the
+                        // "I want a 0805 capacitor" workflow is one
+                        // click away.
+                        {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 38,
+                            cols: [
+                                {
+                                    view: "checkbox",
+                                    id: "pk-parametric-fp-toggle",
+                                    label: "",
+                                    labelRight: "Footprint",
+                                    labelWidth: 0,
+                                    width: 110,
+                                    on: {
+                                        onChange: function (newVal) {
+                                            const v = $$("pk-parametric-fp-multi");
+                                            if (!v) return;
+                                            if (newVal) v.enable(); else { v.disable(); v.setValue([]); }
+                                        },
+                                    },
+                                },
+                                {
+                                    view: "multicombo",
+                                    id: "pk-parametric-fp-multi",
+                                    placeholder: "Pick one or more footprints…",
+                                    options: [],   // populated by ensureParametricLookupsReady
+                                    disabled: true,
+                                    button: true,
+                                },
+                            ],
+                        },
                         {
                             view: "toolbar",
                             css: "pk-pane-toolbar",
@@ -5502,12 +5550,14 @@
         if ("search" in opts) currentParts.search = opts.search;
         if ("byField" in opts) currentParts.byField = opts.byField;
         if ("predicates" in opts) currentParts.predicates = opts.predicates;
+        if ("footprint_ids" in opts) currentParts.footprint_ids = opts.footprint_ids;
         try {
             const json = await api.parts({
                 filter: currentParts.filter,
                 search: currentParts.search,
                 byField: currentParts.byField,
                 predicates: currentParts.predicates,
+                footprint_ids: currentParts.footprint_ids,
                 limit: 500,
                 offset: 0,
             });
@@ -6188,6 +6238,15 @@
             grid.getColumnConfig("si_prefix_id").options = prefOptions;
             grid.getColumnConfig("unit_id").options = unitOptions;
             grid.refreshColumns();
+
+            // Footprint multi-select — populate from cached footprints.
+            const fpMulti = $$("pk-parametric-fp-multi");
+            if (fpMulti && lk.footprints && lk.footprints.length) {
+                fpMulti.define("options",
+                    lk.footprints.map((f) => ({ id: f.id, value: f.name })));
+                fpMulti.refresh();
+            }
+
             parametricLookupsReady = true;
         } catch (e) {
             console.error(e);
@@ -6219,9 +6278,23 @@
     function applyParametricSearch() {
         const grid = $$("pk-parametric-grid");
         if (!grid) return;
+
+        // Footprint multi-select: collected only when the toggle is on.
+        const fpToggle = $$("pk-parametric-fp-toggle");
+        const fpMulti  = $$("pk-parametric-fp-multi");
+        let footprintIds = [];
+        if (fpToggle && fpMulti && fpToggle.getValue()) {
+            const raw = fpMulti.getValue();
+            // multicombo returns a comma-separated string of ids.
+            footprintIds = String(raw || "")
+                .split(",")
+                .map((s) => parseInt(s, 10))
+                .filter((n) => Number.isFinite(n) && n > 0);
+        }
+
         const rows = grid.serialize().filter((r) => (r.name || "").trim() && r.op);
-        if (!rows.length) {
-            webix.message({ type: "error", text: "Add at least one predicate row." });
+        if (!rows.length && footprintIds.length === 0) {
+            webix.message({ type: "error", text: "Add at least one predicate row, or pick a footprint." });
             return;
         }
         const predicates = rows.map((r) => {
@@ -6240,13 +6313,17 @@
             }
             return p;
         });
-        loadParts({ predicates });
+        loadParts({ predicates, footprint_ids: footprintIds });
     }
 
     function resetParametricSearch() {
         const grid = $$("pk-parametric-grid");
         if (grid) grid.clearAll();
-        loadParts({ predicates: [] });
+        const fpToggle = $$("pk-parametric-fp-toggle");
+        const fpMulti  = $$("pk-parametric-fp-multi");
+        if (fpToggle) fpToggle.setValue(0);
+        if (fpMulti)  { fpMulti.setValue([]); fpMulti.disable(); }
+        loadParts({ predicates: [], footprint_ids: [] });
     }
 
     function resetFilters() {

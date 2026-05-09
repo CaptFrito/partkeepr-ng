@@ -185,6 +185,12 @@ pub struct ParametricBody {
     pub footprint_folder: Option<i32>,
     #[serde(default)]
     pub footprint: Option<i32>,
+    /// Multi-select footprint filter — `p.footprint_id IN (...)`.
+    /// Independent of the single-`footprint` field above (which mirrors
+    /// the parts-grid by-field filter from the left tree); this one is
+    /// driven by the parametric pane's footprint chips.
+    #[serde(default)]
+    pub footprint_ids: Vec<i32>,
     #[serde(default)]
     pub search: Option<String>,
     /// Slice 11 follow-up: meta-part filter, mirrors the equivalent on
@@ -600,6 +606,16 @@ async fn run_parametric_search(
     }
     if body.footprint.is_some() {
         where_clauses.push("p.footprint_id = ?".to_string());
+    }
+    if !body.footprint_ids.is_empty() {
+        // Inline-quoted list — values are i32 from a deserialized
+        // request, no injection surface. Using ? placeholders would
+        // require dynamic bind-arity and complicate the existing
+        // bind loop below.
+        let csv = body.footprint_ids.iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>().join(",");
+        where_clauses.push(format!("p.footprint_id IN ({})", csv));
     }
     if body.footprint_folder.is_some() {
         where_clauses.push(
