@@ -6309,28 +6309,21 @@
                 ? `<span class="pk-stock-add">matches stock level</span>`
                 : `<span class="pk-stock-remove">⚠ stock level = ${p.stock_level} (off by ${sum - p.stock_level >= 0 ? "+" : ""}${sum - p.stock_level})</span>`;
             const rows = p.locations.map(l => {
-                const path = l.storage_location_path
-                    ? `<span class="pk-bom-cat">${escapeHtml(l.storage_location_path)}</span>`
-                    : "";
                 return `<tr>
                     <td>${escapeHtml(l.form)}</td>
-                    <td>${escapeHtml(l.storage_location_name || "")} ${path}</td>
+                    <td>${escapeHtml(l.storage_location_name || "")}</td>
                     <td class="pk-numeric">${l.quantity}</td>
-                    <td>${escapeHtml(l.lot_number || "")}</td>
-                    <td>${escapeHtml(l.comment || "")}</td>
                 </tr>`;
             }).join("");
             const footer = `<tr style="font-weight:600;background:#f3f5f7">
                 <td colspan="2" style="text-align:right">Total:</td>
-                <td class="pk-numeric">${sum}</td>
-                <td colspan="2">${driftHtml}</td>
+                <td class="pk-numeric">${sum} <span style="font-weight:400">${driftHtml}</span></td>
             </tr>`;
             sections.push(detailSectionHtml(`Packaging (${p.locations.length})`,
                 `<table class="pk-detail-table">
                     <thead><tr>
                         <th>Form</th><th>Where</th>
                         <th class="pk-numeric">Qty</th>
-                        <th>Lot</th><th>Comment</th>
                     </tr></thead>
                     <tbody>${rows}${footer}</tbody>
                 </table>`));
