@@ -184,22 +184,55 @@ pub async fn create_stock_entry(
     Ok(Json(updated))
 }
 
-/// Insert a fresh PartStorageLocation row for a positive-delta receipt.
-/// Returns the new row's id so the caller can persist it on the
-/// StockEntry as the per-entry container FK.
 async fn insert_new_psl_row(
     tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
     part_id: i32,
     req: &StockChange,
     user_id: i32,
 ) -> Result<i32, AppError> {
-    let storage_location_id = req.storage_location_id;
-    let form = req.form.as_deref().unwrap_or("Loose");
+    insert_psl_row_in_tx(
+        tx,
+        part_id,
+        req.form.as_deref().unwrap_or("Loose"),
+        req.storage_location_id,
+        req.stock_level,
+        req.lot_number.as_deref(),
+        req.date_code.as_deref(),
+        req.comment.as_deref(),
+        user_id,
+    )
+    .await
+}
+
+/// Insert a fresh PartStorageLocation row representing one physical
+/// container that just arrived. Returns the new row's id so the caller
+/// can persist it on the StockEntry as the per-entry container FK.
+///
+/// Reused by:
+///   - `create_stock_entry` (scan-receive + manual stock-add with the
+///     "create packaging row" toggle)
+///   - `digikey::order_receive` and `mouser::order_receive` (slice 13d:
+///     auto-PSL on order-receive)
+///
+/// The row's comment field is built from `date_code` + `comment` since
+/// PartStorageLocation has no dedicated date_code column. Lot number
+/// gets its own column.
+pub async fn insert_psl_row_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    part_id: i32,
+    form: &str,
+    storage_location_id: Option<i32>,
+    quantity: i32,
+    lot_number: Option<&str>,
+    date_code: Option<&str>,
+    comment: Option<&str>,
+    user_id: i32,
+) -> Result<i32, AppError> {
     let mut bits: Vec<String> = Vec::new();
-    if let Some(d) = req.date_code.as_deref().filter(|s| !s.trim().is_empty()) {
+    if let Some(d) = date_code.filter(|s| !s.trim().is_empty()) {
         bits.push(format!("date {}", d));
     }
-    if let Some(c) = req.comment.as_deref().filter(|s| !s.trim().is_empty()) {
+    if let Some(c) = comment.filter(|s| !s.trim().is_empty()) {
         bits.push(c.to_string());
     }
     let comment_str = bits.join(" · ");
@@ -212,8 +245,8 @@ async fn insert_new_psl_row(
     .bind(part_id)
     .bind(storage_location_id)
     .bind(form)
-    .bind(req.stock_level)
-    .bind(req.lot_number.as_deref())
+    .bind(quantity)
+    .bind(lot_number)
     .bind(if comment_str.is_empty() { None } else { Some(comment_str.as_str()) })
     .bind(user_id)
     .execute(&mut **tx)

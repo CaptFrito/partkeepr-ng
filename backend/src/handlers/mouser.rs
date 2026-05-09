@@ -528,11 +528,11 @@ pub async fn order_status(
     let mut lines: Vec<MouserOrderStatusLine> = Vec::with_capacity(detail.order_lines.len());
     for (idx, ol) in detail.order_lines.iter().enumerate() {
         let mouser_pn = ol.product_info.mouser_part_number.trim();
-        let (part_id, part_name, current_stock) = if mouser_pn.is_empty() {
-            (None, None, None)
+        let (part_id, part_name, current_stock, default_storage_location_id) = if mouser_pn.is_empty() {
+            (None, None, None, None)
         } else {
-            let row: Option<(i32, String, i32)> = sqlx::query_as(
-                "SELECT p.id, p.name, p.stockLevel \
+            let row: Option<(i32, String, i32, Option<i32>)> = sqlx::query_as(
+                "SELECT p.id, p.name, p.stockLevel, p.storageLocation_id \
                  FROM PartDistributor pd \
                  JOIN Distributor d ON d.id = pd.distributor_id \
                  JOIN Part p        ON p.id = pd.part_id \
@@ -544,9 +544,29 @@ pub async fn order_status(
             .fetch_optional(&pool)
             .await?;
             match row {
-                Some((pid, name, stock)) => (Some(pid), Some(name), Some(stock)),
-                None => (None, None, None),
+                Some((pid, name, stock, sloc)) => (Some(pid), Some(name), Some(stock), sloc),
+                None => (None, None, None, None),
             }
+        };
+
+        // Slice 13d: already-received units against this Mouser SO#.
+        let units_already_received: Option<i32> = if let Some(pid) = part_id {
+            let v: Option<i64> = sqlx::query_scalar(
+                "SELECT CAST(SUM(stockLevel) AS SIGNED) \
+                 FROM StockEntry se \
+                 JOIN Distributor d ON d.id = se.distributor_id \
+                 WHERE se.part_id = ? \
+                   AND LOWER(d.name) = 'mouser' \
+                   AND se.salesOrderNumber = ? \
+                   AND se.stockLevel > 0",
+            )
+            .bind(pid)
+            .bind(&so_str)
+            .fetch_one(&pool)
+            .await?;
+            Some(v.unwrap_or(0) as i32)
+        } else {
+            None
         };
 
         // Mouser's per-order endpoint returns `Quantity` (ordered),
@@ -568,6 +588,8 @@ pub async fn order_status(
             part_id,
             part_name,
             current_stock,
+            default_storage_location_id,
+            units_already_received,
         });
     }
 
@@ -615,6 +637,26 @@ pub async fn order_receive(
         let default_comment = format!("Mouser SO #{} line {}", req.order_id, idx + 1);
         let comment = line.comment.as_deref().filter(|s| !s.trim().is_empty())
             .unwrap_or(&default_comment);
+
+        // Slice 13d: parallel to digikey::order_receive — mint a PSL
+        // row per line unless the operator opted out (already scanned
+        // this reel earlier).
+        let psl_id: Option<i32> = if line.skip_psl_row {
+            None
+        } else {
+            let form = line.form.as_deref().unwrap_or("Loose");
+            Some(crate::handlers::stock::insert_psl_row_in_tx(
+                &mut tx,
+                line.part_id,
+                form,
+                line.storage_location_id,
+                line.quantity,
+                None, None,
+                Some(comment),
+                user.user_id,
+            ).await?)
+        };
+
         let (stock_after, low_stock) = crate::handlers::stock::apply_stock_change_in_tx(
             &mut tx,
             line.part_id,
@@ -627,7 +669,7 @@ pub async fn order_receive(
                 distributor_id: Some(mouser_id),
                 sales_order_number: Some(&so_str),
             },
-            None, // order-receive doesn't auto-mint PSL rows
+            psl_id,
         ).await?;
         results.push(MouserOrderReceiveResult {
             part_id: line.part_id,

@@ -9473,11 +9473,31 @@
         const winId = "pk-dk-receive-dialog";
         if ($$(winId)) { $$(winId).destructor(); }
 
+        // Slice 13d: lookups (storage locations) needed for the per-line
+        // Storage picker. Must be loaded *before* the grid renders or
+        // the richselect popups won't have data.
+        try { await ensureLookups(); }
+        catch (e) {
+            webix.message({ type: "error", text: "Failed to load lookups: " + (e.message || e) });
+            return;
+        }
+        const storageOptions = (lookupsCache && lookupsCache.storage_locations || [])
+            .map((s) => ({ id: s.id, value: s.name }));
+        const formOptions = SCAN_FORM_OPTIONS.slice();
+
         const sourceLabel = (s) => s === "mouser" ? "Mouser" : "Digi-Key";
         const skuHeaderFor = (s) => s === "mouser" ? "Mouser P/N" : "DK P/N";
 
         let preview = null;  // OrderStatusResponse from the last fetch
-        let lineState = [];  // per-line: {apply: bool, quantity: int}
+        // Slice 13d: per-line state extends to packaging + skip flag.
+        //   apply:                 include this line in the apply batch
+        //   quantity:              units to apply (residual on partial lines)
+        //   form:                  PSL form to mint with (default Loose)
+        //   storage_location_id:   PSL storage (default part's primary, fallback (NOWHERE))
+        //   skip_psl_row:          don't mint a PSL row (already scanned)
+        //   received:              units already received against this SO# (display)
+        //   fully_received:        true → row greyed, apply forced false
+        let lineState = [];
 
         const headTpl = (sid) => sid
             ? `Receive ${sourceLabel(source)} Sales Order #${sid}`
@@ -9488,7 +9508,7 @@
             id: winId,
             modal: true,
             position: "center",
-            width: 1080,
+            width: 1320,
             height: 640,
             head: headTpl(null),
             body: {
@@ -9602,25 +9622,72 @@
                                         `<span class="pk-dk-rcv-import webix_link" style="cursor:pointer;color:#2a6fb0">🔎 Import</span>`;
                                 },
                             },
-                            { id: "quantity_shipped", header: "Qty shipped", width: 100, css: "right" },
+                            { id: "quantity_shipped", header: "Qty shipped", width: 90, css: "right" },
+                            {
+                                // Slice 13d: how many units already received against this SO#.
+                                // Pulls from StockEntry rows attributed to (distributor, SO#).
+                                // Green = full, orange = partial, neutral = zero.
+                                id: "_received",
+                                header: "Recv'd",
+                                width: 80,
+                                css: "right",
+                                template: function (o) {
+                                    if (o.units_already_received == null) return "";
+                                    const r = o.units_already_received;
+                                    const target = o.quantity_shipped > 0 ? o.quantity_shipped : o.quantity_ordered;
+                                    if (r <= 0) return `<span style="color:#7f8c8d">0/${target}</span>`;
+                                    if (r >= target) return `<span style="color:#2a8a2a">${r}/${target} ✓</span>`;
+                                    return `<span style="color:#aa6b2a">${r}/${target}</span>`;
+                                },
+                            },
                             {
                                 id: "_qty",
                                 header: "Apply qty",
-                                width: 110,
+                                width: 90,
                                 editor: "text",
+                                css: "right",
+                            },
+                            // Slice 13d: per-line packaging defaults.
+                            {
+                                id: "_form",
+                                header: "Form",
+                                width: 110,
+                                editor: "richselect",
+                                options: formOptions,
+                            },
+                            {
+                                id: "_storage",
+                                header: "Storage",
+                                width: 160,
+                                editor: "richselect",
+                                options: storageOptions,
+                                template: function (o) {
+                                    if (!o._storage) return `<span style="color:#7f8c8d">(NOWHERE)</span>`;
+                                    const m = storageOptions.find((s) => s.id == o._storage);
+                                    return m ? escapeHtml(m.value) : `#${o._storage}`;
+                                },
+                            },
+                            {
+                                id: "_skip",
+                                header: "Skip pkg",
+                                tooltip: "Skip the per-line packaging row — use when the operator already scanned this reel separately",
+                                width: 80,
+                                template: "{common.checkbox()}",
+                                checkValue: true,
+                                uncheckValue: false,
                                 css: "right",
                             },
                             {
                                 id: "_price",
                                 header: "Unit price",
-                                width: 110,
+                                width: 100,
                                 css: "right",
                                 template: function (o) {
                                     if (!o.unit_price) return "";
                                     return o.unit_price.toFixed(4) + " " + (preview && preview.currency || "");
                                 },
                             },
-                            { id: "description", header: "Description", fillspace: true, minWidth: 200 },
+                            { id: "description", header: "Description", fillspace: true, minWidth: 180 },
                         ],
                         onClick: {
                             "pk-dk-rcv-import": function (ev, rid) {
@@ -9633,19 +9700,39 @@
                         on: {
                             onCheck: function (rid, cid, val) {
                                 const idx = this.getIndexById(rid);
-                                if (lineState[idx]) lineState[idx].apply = !!val;
+                                if (!lineState[idx]) return;
+                                if (cid === "_apply") {
+                                    // Don't let the operator re-enable a fully-received line
+                                    // by clicking the box (would double-count).
+                                    if (lineState[idx].fully_received && val) {
+                                        this.updateItem(rid, { _apply: false });
+                                        webix.message({ type: "info",
+                                            text: "Line already fully received against this SO#." });
+                                        return;
+                                    }
+                                    lineState[idx].apply = !!val;
+                                } else if (cid === "_skip") {
+                                    lineState[idx].skip_psl_row = !!val;
+                                }
                                 refreshSummary();
                             },
                             onAfterEditStop: function (state, ed) {
-                                if (ed.column !== "_qty") return;
                                 const idx = this.getIndexById(ed.row);
-                                const n = parseInt(state.value, 10);
-                                if (!Number.isFinite(n) || n < 0) {
-                                    this.updateItem(ed.row, { _qty: lineState[idx].quantity });
-                                    return;
+                                if (!lineState[idx]) return;
+                                if (ed.column === "_qty") {
+                                    const n = parseInt(state.value, 10);
+                                    if (!Number.isFinite(n) || n < 0) {
+                                        this.updateItem(ed.row, { _qty: lineState[idx].quantity });
+                                        return;
+                                    }
+                                    lineState[idx].quantity = n;
+                                    refreshSummary();
+                                } else if (ed.column === "_form") {
+                                    lineState[idx].form = state.value || "Loose";
+                                } else if (ed.column === "_storage") {
+                                    const sid = parseInt(state.value, 10);
+                                    lineState[idx].storage_location_id = sid > 0 ? sid : null;
                                 }
-                                lineState[idx].quantity = n;
-                                refreshSummary();
                             },
                         },
                     },
@@ -9678,19 +9765,23 @@
             const sum = $$("pk-dk-rcv-summary");
             const applyBtn = $$("pk-dk-rcv-apply");
             if (!preview || !grid || !sum || !applyBtn) return;
-            let lines = 0, units = 0, skipped = 0, noMatch = 0;
+            let lines = 0, units = 0, skipped = 0, noMatch = 0, alreadyDone = 0;
             grid.eachRow(function (rid) {
                 const idx = grid.getIndexById(rid);
                 const item = grid.getItem(rid);
                 const st = lineState[idx];
-                if (!st || !st.apply) { skipped++; return; }
+                if (!st) { skipped++; return; }
+                if (st.fully_received) { alreadyDone++; return; }
+                if (!st.apply) { skipped++; return; }
                 if (!item.part_id) { noMatch++; return; }
                 if (!st.quantity || st.quantity <= 0) { skipped++; return; }
                 lines++;
                 units += st.quantity;
             });
             const txt = `${lines} line${lines === 1 ? "" : "s"} → +${units} unit${units === 1 ? "" : "s"} ` +
-                `· ${skipped} skipped` + (noMatch ? ` · ${noMatch} no-match (will skip)` : "");
+                `· ${skipped} skipped` +
+                (alreadyDone ? ` · ${alreadyDone} already received` : "") +
+                (noMatch ? ` · ${noMatch} no-match (will skip)` : "");
             sum.setHTML(`<span style="padding:0 12px">${escapeHtml(txt)}</span>`);
             applyBtn.define("disabled", lines === 0);
             applyBtn.refresh();
@@ -9720,20 +9811,38 @@
             }
             const win = $$(winId);
             if (win) win.config.head = headTpl(preview.sales_order_id);
-            // Per-line: default apply=true when matched & shipped > 0;
-            // default qty = quantity_shipped (or quantity ordered if
-            // shipped is zero — typical for not-yet-shipped orders).
+            // Per-line state init. Slice 13d rules:
+            //   target           = quantity_shipped or quantity_ordered (fallback)
+            //   already_received = StockEntry sum for this (distributor, SO#)
+            //   residual         = max(target - already_received, 0)
+            //   fully_received   = already_received >= target
+            //   apply default    = matched && residual > 0 && !fully_received
+            //   quantity default = residual (so partial shipments pre-fill correctly)
+            //   form default     = "Loose"  (operator picks per-line if it's actually a Reel)
+            //   storage default  = part's primary, fall back to (NOWHERE)
+            //   skip default     = false  (mint a PSL row by default)
             lineState = preview.lines.map((li) => {
-                const qty = li.quantity_shipped > 0 ? li.quantity_shipped : li.quantity_ordered;
+                const target = li.quantity_shipped > 0 ? li.quantity_shipped : li.quantity_ordered;
+                const already = li.units_already_received || 0;
+                const residual = Math.max(target - already, 0);
+                const fully = !!li.part_id && already >= target && target > 0;
                 return {
-                    apply: !!li.part_id && li.quantity_shipped > 0,
-                    quantity: qty || 0,
+                    apply: !!li.part_id && residual > 0 && !fully,
+                    quantity: residual,
+                    form: "Loose",
+                    storage_location_id: li.default_storage_location_id || null,
+                    skip_psl_row: false,
+                    received: already,
+                    fully_received: fully,
                 };
             });
             const rows = preview.lines.map((li, i) => Object.assign({}, li, {
                 id: i + 1,
                 _apply: lineState[i].apply,
                 _qty: lineState[i].quantity,
+                _form: lineState[i].form,
+                _storage: lineState[i].storage_location_id || 0,
+                _skip: lineState[i].skip_psl_row,
             }));
             const grid = $$("pk-dk-rcv-grid");
             grid.clearAll();
@@ -9791,6 +9900,10 @@
                     quantity: st.quantity,
                     price: li.unit_price ? li.unit_price.toFixed(4) : null,
                     comment: null,
+                    // Slice 13d: per-line packaging metadata.
+                    form: st.form || "Loose",
+                    storage_location_id: st.storage_location_id || null,
+                    skip_psl_row: !!st.skip_psl_row,
                 });
             });
             if (lines.length === 0) {

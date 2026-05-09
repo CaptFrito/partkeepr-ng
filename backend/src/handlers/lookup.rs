@@ -151,6 +151,18 @@ pub struct OrderStatusLine {
     pub part_id: Option<i32>,
     pub part_name: Option<String>,
     pub current_stock: Option<i32>,
+    /// The matched part's primary storage location, used to pre-fill
+    /// the per-line storage picker on the receive dialog. `None` when
+    /// `part_id` is None or the part has no primary set.
+    pub default_storage_location_id: Option<i32>,
+    /// Slice 13d: how many units of *this* part have already been
+    /// received against *this* SO# (sum of positive-delta StockEntry
+    /// rows with matching `(distributor_id, salesOrderNumber)`). Lets
+    /// the receive dialog auto-disable fully-received lines and
+    /// pre-fill the residual on partial ones, so a two-shipment order
+    /// can be received in two passes without double-counting.
+    /// `None` when `part_id` is None (no local match → can't compute).
+    pub units_already_received: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +179,18 @@ pub struct OrderReceiveLine {
     pub price: Option<rust_decimal::Decimal>,
     /// Override the default comment ("<Distributor> SO #{n} line {k}").
     pub comment: Option<String>,
+    /// Slice 13d: per-line container metadata. When `skip_psl_row` is
+    /// false (default), the receive handler mints a PartStorageLocation
+    /// row capturing the physical container that arrived and FK-links
+    /// it to the new StockEntry. When true, just a StockEntry is
+    /// inserted (operator already created the PSL row some other way,
+    /// e.g. via scan-receive of the same physical reel earlier).
+    #[serde(default)]
+    pub form: Option<String>,
+    #[serde(default)]
+    pub storage_location_id: Option<i32>,
+    #[serde(default)]
+    pub skip_psl_row: bool,
 }
 
 #[derive(Debug, Serialize)]
