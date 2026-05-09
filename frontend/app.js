@@ -4104,6 +4104,119 @@
     // the parts grid is populated from /api/parts/parametric instead.
     let currentParts = { filter: null, search: "", byField: {}, predicates: [], footprint_ids: [] };
 
+    /// Selected footprint ids in the parametric pane's footprint
+    /// picker. Module-level so the popup can read/write while open
+    /// and the main applyParametricSearch can read on submit.
+    let selectedFootprintIds = [];
+
+    /// Refresh the right-hand status label next to the footprint
+    /// picker button. "(none picked)" / "1 footprint" / "0603, 0805".
+    function refreshParametricFpLabel() {
+        const lbl = $$("pk-parametric-fp-status");
+        if (!lbl) return;
+        if (!selectedFootprintIds.length) {
+            lbl.define("label", '<span style="color:#aaa">(none picked)</span>');
+        } else {
+            const fps = lookupsCache && lookupsCache.footprints || [];
+            const names = selectedFootprintIds
+                .map((id) => (fps.find((f) => f.id === id) || {}).name)
+                .filter(Boolean);
+            // Show names if short, else just count.
+            const label = (names.length <= 4 && names.join(", ").length <= 60)
+                ? names.join(", ")
+                : `${names.length} footprints`;
+            lbl.define("label", `<span>${escapeHtml(label)}</span>`);
+        }
+        lbl.refresh();
+    }
+
+    /// Popup-based multi-select for footprints (replacement for
+    /// `multicombo` which is Pro-only). Shows a scrollable list of
+    /// every footprint with multi-select checkboxes. Pre-selects
+    /// whatever's already in `selectedFootprintIds`. Click outside
+    /// the popup to close — selection auto-commits via the list's
+    /// select-change event.
+    function openFootprintPickerPopup(anchorBtn) {
+        const old = $$("pk-fp-popup");
+        if (old) old.destructor();
+
+        const fps = (lookupsCache && lookupsCache.footprints) || [];
+        const data = fps.map((f) => ({ id: f.id, value: f.name }));
+
+        const popup = webix.ui({
+            view: "popup",
+            id: "pk-fp-popup",
+            width: 280,
+            height: 320,
+            body: {
+                rows: [
+                    {
+                        view: "search",
+                        id: "pk-fp-search",
+                        placeholder: "Filter footprints…",
+                        on: {
+                            onTimedKeyPress: function () {
+                                const list = $$("pk-fp-list");
+                                if (!list) return;
+                                const q = (this.getValue() || "").toLowerCase();
+                                list.filter((item) =>
+                                    !q || (item.value || "").toLowerCase().indexOf(q) !== -1);
+                            },
+                        },
+                    },
+                    {
+                        view: "list",
+                        id: "pk-fp-list",
+                        select: "multiselect",       // GPL-supported
+                        template: "#value#",
+                        data: data,
+                        scroll: "y",
+                        on: {
+                            onSelectChange: function () {
+                                const ids = this.getSelectedId(true);
+                                // getSelectedId(true) returns array of ids
+                                // (or empty array). Webix sometimes hands a
+                                // string when only one is selected in pre-
+                                // 11 versions; guard the type.
+                                selectedFootprintIds = Array.isArray(ids)
+                                    ? ids.map((n) => parseInt(n, 10)).filter(Boolean)
+                                    : (ids ? [parseInt(ids, 10)] : []);
+                                refreshParametricFpLabel();
+                            },
+                        },
+                    },
+                    {
+                        view: "toolbar",
+                        cols: [
+                            {},
+                            { view: "button", value: "Clear", width: 80,
+                              click: () => {
+                                  $$("pk-fp-list").unselectAll();
+                                  selectedFootprintIds = [];
+                                  refreshParametricFpLabel();
+                              } },
+                            { view: "button", value: "Done", css: "webix_primary", width: 80,
+                              click: () => $$("pk-fp-popup") && $$("pk-fp-popup").hide() },
+                        ],
+                    },
+                ],
+            },
+        });
+
+        // Pre-select whatever was already picked.
+        const list = $$("pk-fp-list");
+        if (list) {
+            selectedFootprintIds.forEach((id) => {
+                if (list.exists(id)) list.select(id, true);
+            });
+        }
+        if (anchorBtn && anchorBtn.$view) {
+            popup.show(anchorBtn.$view);
+        } else {
+            popup.show();
+        }
+    }
+
     function buildCenterPane() {
         return {
             id: "pk-center",
@@ -4314,11 +4427,11 @@
                     hidden: true,
                     rows: [
                         // Footprint filter row — multi-select, gated by
-                        // a checkbox so it stays out of the way for
-                        // operators searching purely on parameters or
-                        // text. Sits above the predicates grid so the
-                        // "I want a 0805 capacitor" workflow is one
-                        // click away.
+                        // a checkbox. Webix Standard (GPL) doesn't ship
+                        // `multicombo` (Pro-only), so we use a button
+                        // that opens a popup with a `list` in
+                        // multiselect mode, which IS in GPL. Status
+                        // label shows the current pick count.
                         {
                             view: "toolbar",
                             css: "pk-pane-toolbar",
@@ -4333,19 +4446,31 @@
                                     width: 110,
                                     on: {
                                         onChange: function (newVal) {
-                                            const v = $$("pk-parametric-fp-multi");
-                                            if (!v) return;
-                                            if (newVal) v.enable(); else { v.disable(); v.setValue([]); }
+                                            const btn = $$("pk-parametric-fp-button");
+                                            if (!btn) return;
+                                            if (newVal) {
+                                                btn.enable();
+                                            } else {
+                                                btn.disable();
+                                                selectedFootprintIds = [];
+                                                refreshParametricFpLabel();
+                                            }
                                         },
                                     },
                                 },
                                 {
-                                    view: "multicombo",
-                                    id: "pk-parametric-fp-multi",
-                                    placeholder: "Pick one or more footprints…",
-                                    options: [],   // populated by ensureParametricLookupsReady
+                                    view: "button",
+                                    id: "pk-parametric-fp-button",
+                                    value: "Pick footprints…",
+                                    width: 200,
                                     disabled: true,
-                                    button: true,
+                                    click: function () { openFootprintPickerPopup(this); },
+                                },
+                                {
+                                    view: "label",
+                                    id: "pk-parametric-fp-status",
+                                    label: "",
+                                    css: "pk-help-hint",
                                 },
                             ],
                         },
@@ -6239,13 +6364,10 @@
             grid.getColumnConfig("unit_id").options = unitOptions;
             grid.refreshColumns();
 
-            // Footprint multi-select — populate from cached footprints.
-            const fpMulti = $$("pk-parametric-fp-multi");
-            if (fpMulti && lk.footprints && lk.footprints.length) {
-                fpMulti.define("options",
-                    lk.footprints.map((f) => ({ id: f.id, value: f.name })));
-                fpMulti.refresh();
-            }
+            // Footprint picker label initialization. The popup itself
+            // builds its data from lookupsCache.footprints on demand,
+            // so nothing to seed here beyond rendering "(none picked)".
+            refreshParametricFpLabel();
 
             parametricLookupsReady = true;
         } catch (e) {
@@ -6280,17 +6402,12 @@
         if (!grid) return;
 
         // Footprint multi-select: collected only when the toggle is on.
+        // selectedFootprintIds is a module-level array maintained by
+        // the popup picker (openFootprintPickerPopup).
         const fpToggle = $$("pk-parametric-fp-toggle");
-        const fpMulti  = $$("pk-parametric-fp-multi");
-        let footprintIds = [];
-        if (fpToggle && fpMulti && fpToggle.getValue()) {
-            const raw = fpMulti.getValue();
-            // multicombo returns a comma-separated string of ids.
-            footprintIds = String(raw || "")
-                .split(",")
-                .map((s) => parseInt(s, 10))
-                .filter((n) => Number.isFinite(n) && n > 0);
-        }
+        const footprintIds = (fpToggle && fpToggle.getValue())
+            ? selectedFootprintIds.slice()
+            : [];
 
         const rows = grid.serialize().filter((r) => (r.name || "").trim() && r.op);
         if (!rows.length && footprintIds.length === 0) {
@@ -6320,9 +6437,11 @@
         const grid = $$("pk-parametric-grid");
         if (grid) grid.clearAll();
         const fpToggle = $$("pk-parametric-fp-toggle");
-        const fpMulti  = $$("pk-parametric-fp-multi");
+        const fpBtn    = $$("pk-parametric-fp-button");
         if (fpToggle) fpToggle.setValue(0);
-        if (fpMulti)  { fpMulti.setValue([]); fpMulti.disable(); }
+        if (fpBtn)    fpBtn.disable();
+        selectedFootprintIds = [];
+        refreshParametricFpLabel();
         loadParts({ predicates: [], footprint_ids: [] });
     }
 
