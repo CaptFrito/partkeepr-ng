@@ -7888,15 +7888,27 @@
         const locationsGrid = $$("pk-edit-locations");
         body.locations = locationsGrid
             ? locationsGrid.serialize()
-                // Drop rows missing a storage location — partial / abandoned rows
-                .filter((r) => r.storage_location_id)
-                .map((r) => ({
-                    storage_location_id: parseInt(r.storage_location_id, 10),
-                    form: r.form || "Loose",
-                    quantity: parseInt(r.quantity, 10) || 0,
-                    lot_number: (r.lot_number || "").trim() || null,
-                    comment: (r.comment || "").trim() || null,
-                }))
+                // Drop only abandoned / empty rows. (unassigned) storage
+                // is a legitimate state now (null storageLocation_id), so
+                // we no longer require it. The bar for "real row": a form
+                // is set AND quantity > 0, OR a lot/comment was filled in.
+                .filter((r) => {
+                    const qty = parseInt(r.quantity, 10) || 0;
+                    const lot = (r.lot_number || "").trim();
+                    const cmt = (r.comment || "").trim();
+                    return (r.form && qty > 0) || lot || cmt;
+                })
+                .map((r) => {
+                    const sid = parseInt(r.storage_location_id, 10);
+                    return {
+                        // null = "(unassigned)" — schema column is now nullable.
+                        storage_location_id: Number.isFinite(sid) && sid > 0 ? sid : null,
+                        form: r.form || "Loose",
+                        quantity: parseInt(r.quantity, 10) || 0,
+                        lot_number: (r.lot_number || "").trim() || null,
+                        comment: (r.comment || "").trim() || null,
+                    };
+                })
             : [];
         try {
             let savedId;
