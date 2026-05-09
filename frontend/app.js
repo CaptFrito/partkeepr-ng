@@ -6311,7 +6311,7 @@
                 <td class="pk-numeric">${sum}</td>
                 <td colspan="2">${driftHtml}</td>
             </tr>`;
-            sections.push(detailSectionHtml(`Locations (${p.locations.length})`,
+            sections.push(detailSectionHtml(`Containers (${p.locations.length})`,
                 `<table class="pk-detail-table">
                     <thead><tr>
                         <th>Form</th><th>Where</th>
@@ -6559,6 +6559,49 @@
                 value: "",
                 placeholder: "Optional. Enables Receipts tracking.",
             });
+            // Optional Container fields. Off by default; toggling on
+            // creates a fresh PartStorageLocation row alongside the
+            // StockEntry — same as the scan-receive flow.
+            elements.push({
+                view: "checkbox", id: "pk-stock-container-toggle",
+                labelRight: "Track as a new container (reel, strip, ...)",
+                labelWidth: 150, label: "",
+                on: {
+                    onChange: function (newVal) {
+                        ["pk-stock-form", "pk-stock-storage", "pk-stock-lot", "pk-stock-date"]
+                            .forEach((id) => {
+                                const v = $$(id);
+                                if (!v) return;
+                                if (newVal) v.show(); else v.hide();
+                            });
+                    },
+                },
+            });
+            const formOpts = SCAN_FORM_OPTIONS.slice();  // Reel/CutTape/Loose/...
+            const storageOpts = (lookupsCache && lookupsCache.storage_locations || [])
+                .map((s) => ({ id: s.id, value: s.name }));
+            // Default storage = the part's primary storage_location_id
+            // when set; otherwise the first cached location.
+            const defaultStorage = (currentPart.storage_location_id
+                && storageOpts.some((s) => s.id === currentPart.storage_location_id))
+                ? currentPart.storage_location_id
+                : (storageOpts[0] && storageOpts[0].id) || null;
+            elements.push({
+                view: "richselect", id: "pk-stock-form", label: "Form", labelWidth: 150,
+                hidden: true, options: formOpts, value: "Loose",
+            });
+            elements.push({
+                view: "richselect", id: "pk-stock-storage", label: "Storage", labelWidth: 150,
+                hidden: true, options: storageOpts, value: defaultStorage,
+            });
+            elements.push({
+                view: "text", id: "pk-stock-lot", label: "Lot", labelWidth: 150,
+                hidden: true, value: "",
+            });
+            elements.push({
+                view: "text", id: "pk-stock-date", label: "Date code", labelWidth: 150,
+                hidden: true, value: "",
+            });
         }
 
         elements.push({
@@ -6646,6 +6689,24 @@
                     // otherwise it'd half-attribute and confuse the
                     // Receipts aggregation. Comment field is still free
                     // for ad-hoc notes.
+                }
+                // Optional Container row creation. Off by default;
+                // operator opts in via the toggle. Same shape as the
+                // scan-receive dialog's payload.
+                const wantContainer = !!$$("pk-stock-container-toggle").getValue();
+                if (wantContainer) {
+                    const storageId = parseInt($$("pk-stock-storage").getValue(), 10);
+                    if (!storageId) {
+                        webix.message({ type: "error", text: "Pick a storage location for the container." });
+                        return;
+                    }
+                    body.create_storage_row = true;
+                    body.form = $$("pk-stock-form").getValue() || "Loose";
+                    body.storage_location_id = storageId;
+                    const lot = ($$("pk-stock-lot").getValue() || "").trim();
+                    const dc  = ($$("pk-stock-date").getValue() || "").trim();
+                    if (lot) body.lot_number = lot;
+                    if (dc)  body.date_code = dc;
                 }
             }
         }
@@ -7442,7 +7503,7 @@
                                 },
                             },
                             {
-                                header: "Locations",
+                                header: "Containers",
                                 body: {
                                     rows: [
                                         {
