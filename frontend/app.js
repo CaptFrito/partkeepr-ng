@@ -854,7 +854,7 @@
 
         // Storage locations. (unbinned) = id 0 → null on submit, for
         // when the operator hasn't decided where to put it yet.
-        const storageOptions = [{ id: "_unbinned", value: "(unbinned)" }].concat(
+        const storageOptions = [{ id: "_unbinned", value: "(unassigned)" }].concat(
             (lookupsCache && lookupsCache.storage_locations || [])
                 .map((s) => ({ id: s.id, value: s.name }))
         );
@@ -6310,7 +6310,7 @@
                 <td class="pk-numeric">${sum}</td>
                 <td colspan="2">${driftHtml}</td>
             </tr>`;
-            sections.push(detailSectionHtml(`Containers (${p.locations.length})`,
+            sections.push(detailSectionHtml(`Packaging (${p.locations.length})`,
                 `<table class="pk-detail-table">
                     <thead><tr>
                         <th>Form</th><th>Where</th>
@@ -6571,7 +6571,7 @@
             // StockEntry — same as the scan-receive flow.
             elements.push({
                 view: "checkbox", id: "pk-stock-container-toggle",
-                labelRight: "Track as a new container (reel, strip, ...)",
+                labelRight: "Add a packaging entry (reel, strip, …)",
                 labelWidth: 150, label: "",
                 on: {
                     onChange: function (newVal) {
@@ -6592,7 +6592,7 @@
             // "(unbinned)" sentinel = id 0 → null on submit. Operator
             // can record stock without committing to a specific
             // storage location yet.
-            const storageOpts = [{ id: "_unbinned", value: "(unbinned)" }].concat(
+            const storageOpts = [{ id: "_unbinned", value: "(unassigned)" }].concat(
                 (lookupsCache && lookupsCache.storage_locations || [])
                     .map((s) => ({ id: s.id, value: s.name }))
             );
@@ -6826,7 +6826,7 @@
         if (!grid) return;
         const sel = grid.getSelectedId();
         if (!sel) {
-            webix.message({ type: "error", text: "Select a container row first." });
+            webix.message({ type: "error", text: "Select a packaging row first." });
             return;
         }
         const src = grid.getItem(sel);
@@ -6853,7 +6853,7 @@
             modal: true,
             position: "center",
             width: 480,
-            head: "Split / move container",
+            head: "Split / move packaging",
             body: {
                 view: "form",
                 id: "pk-split-container-form",
@@ -7189,7 +7189,7 @@
         // (unbinned) sentinel = id 0 → null; PartStorageLocation
         // rows (Container rows) can be unbinned, so the picker
         // needs an explicit option for that case.
-        const storageOptions = [{ id: "_unbinned", value: "(unbinned)" }].concat(
+        const storageOptions = [{ id: "_unbinned", value: "(unassigned)" }].concat(
             lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }))
         );
         const partUnitOptions = lookups.part_units.map((u) => ({
@@ -7638,7 +7638,7 @@
                                 },
                             },
                             {
-                                header: "Containers",
+                                header: "Packaging",
                                 body: {
                                     rows: [
                                         {
@@ -7649,7 +7649,7 @@
                                                 { view: "button", value: "+ Add row", css: "pk-btn-add", width: 100,
                                                   click: () => editorAddRow("pk-edit-locations", { form: "Loose", quantity: "0" }) },
                                                 { view: "button", value: "⇄ Split / move", width: 130,
-                                                  tooltip: "Take N pcs out of the selected container and move them into a new container with a different form (e.g., 1000 pcs from Loose → Reel). Total stock is unchanged.",
+                                                  tooltip: "Take N pcs out of the selected packaging and move them into a new packaging entry with a different form (e.g., 1000 pcs from Loose → Reel). Total stock is unchanged.",
                                                   click: () => openSplitContainerDialog(seed, formOptions, storageOptions) },
                                                 { view: "button", value: "− Remove selected", css: "pk-btn-remove", width: 160,
                                                   click: () => { editorRemoveRow("pk-edit-locations"); updateLocationsTotal(seed); } },
@@ -7683,7 +7683,7 @@
                                                     options: storageOptions,
                                                     template: function (o) {
                                                         if (!o.storage_location_id) {
-                                                            return `<span class="pk-help-hint">(unbinned)</span>`;
+                                                            return `<span class="pk-help-hint">(unassigned)</span>`;
                                                         }
                                                         const name = storageLocNameById.get(String(o.storage_location_id));
                                                         return name ? escapeHtml(name) : "";
