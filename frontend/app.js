@@ -854,7 +854,7 @@
 
         // Storage locations. (unbinned) = id 0 → null on submit, for
         // when the operator hasn't decided where to put it yet.
-        const storageOptions = [{ id: 0, value: "(unbinned)" }].concat(
+        const storageOptions = [{ id: "_unbinned", value: "(unbinned)" }].concat(
             (lookupsCache && lookupsCache.storage_locations || [])
                 .map((s) => ({ id: s.id, value: s.name }))
         );
@@ -6592,14 +6592,14 @@
             // "(unbinned)" sentinel = id 0 → null on submit. Operator
             // can record stock without committing to a specific
             // storage location yet.
-            const storageOpts = [{ id: 0, value: "(unbinned)" }].concat(
+            const storageOpts = [{ id: "_unbinned", value: "(unbinned)" }].concat(
                 (lookupsCache && lookupsCache.storage_locations || [])
                     .map((s) => ({ id: s.id, value: s.name }))
             );
             const defaultStorage = (currentPart.storage_location_id
                 && storageOpts.some((s) => s.id === currentPart.storage_location_id))
                 ? currentPart.storage_location_id
-                : 0;  // (unbinned)
+                : "_unbinned";
             elements.push({
                 view: "richselect", id: "pk-stock-form", label: "Form", labelWidth: 150,
                 disabled: true, options: formOpts, value: "Loose",
@@ -7189,7 +7189,7 @@
         // (unbinned) sentinel = id 0 → null; PartStorageLocation
         // rows (Container rows) can be unbinned, so the picker
         // needs an explicit option for that case.
-        const storageOptions = [{ id: 0, value: "(unbinned)" }].concat(
+        const storageOptions = [{ id: "_unbinned", value: "(unbinned)" }].concat(
             lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }))
         );
         const partUnitOptions = lookups.part_units.map((u) => ({
