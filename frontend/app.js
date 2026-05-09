@@ -672,7 +672,7 @@
             move: false,
             position: "center",
             width: 360,
-            head: "Sign in to PartKeeper",
+            head: "Sign in to PartKeepr-ng",
             body: {
                 view: "form",
                 id: "pk-login-form",
@@ -789,7 +789,10 @@
             css: "pk-header",
             height: 40,
             cols: [
-                { view: "label", label: '<span class="pk-app-title">PartKeeper</span>', width: 160 },
+                { view: "label",
+                  label: '<img src="assets/logo.svg" class="pk-app-logo" alt=""/>' +
+                         '<span class="pk-app-title">PartKeepr-ng</span>',
+                  width: 200 },
                 {},
                 {
                     view: "search",
@@ -8628,7 +8631,7 @@
     function showFatalError(e) {
         document.body.innerHTML =
             '<div style="font-family:sans-serif;padding:24px;color:#a33">' +
-            '<h2>PartKeeper failed to start</h2>' +
+            '<h2>PartKeepr-ng failed to start</h2>' +
             '<pre>' + escapeHtml(e && e.message ? e.message : String(e)) + '</pre>' +
             '</div>';
         console.error("[partkeepr] boot failed", e);

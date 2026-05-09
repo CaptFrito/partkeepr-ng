@@ -23,6 +23,18 @@
     font-weight: 600;
     font-size: 15px;
     letter-spacing: 0.3px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* The teal "P" logo lifted from upstream PartKeepr (GPLv3, no
+   trademark claim). Used in the banner and as the favicon. */
+.pk-header .pk-app-logo {
+    height: 28px;
+    width: 28px;
+    vertical-align: middle;
+    /* The SVG's interior glyph is white on dark teal; in the
+       header that contrast carries fine without a background fill. */
 }
 
 .pk-user-name {
