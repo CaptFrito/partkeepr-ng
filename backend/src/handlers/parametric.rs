@@ -191,6 +191,14 @@ pub struct ParametricBody {
     /// driven by the parametric pane's footprint chips.
     #[serde(default)]
     pub footprint_ids: Vec<i32>,
+    /// Multi-select **functional-class** filter. Each picked category
+    /// expands to its full sub-tree via PartCategory's nested-set
+    /// (lft/rgt) — picking "Active Components" matches every part
+    /// in any of its descendants. OR'd across the picks. Independent
+    /// of the existing `category` field (single, exact match) and
+    /// the left-tree filter.
+    #[serde(default)]
+    pub category_ids: Vec<i32>,
     #[serde(default)]
     pub search: Option<String>,
     /// Slice 11 follow-up: meta-part filter, mirrors the equivalent on
@@ -616,6 +624,21 @@ async fn run_parametric_search(
             .map(|n| n.to_string())
             .collect::<Vec<_>>().join(",");
         where_clauses.push(format!("p.footprint_id IN ({})", csv));
+    }
+    if !body.category_ids.is_empty() {
+        // Sub-tree expansion via nested-set (lft/rgt). Each picked
+        // category matches itself + all descendants. Same i32-only
+        // safety reasoning as footprint_ids above.
+        let csv = body.category_ids.iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>().join(",");
+        where_clauses.push(format!(
+            "EXISTS ( \
+                SELECT 1 FROM PartCategory child \
+                JOIN PartCategory parent ON parent.id IN ({csv}) \
+                WHERE child.id = p.category_id \
+                  AND child.lft BETWEEN parent.lft AND parent.rgt )"
+        ));
     }
     if body.footprint_folder.is_some() {
         where_clauses.push(

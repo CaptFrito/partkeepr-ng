@@ -36,16 +36,17 @@
             if (!r.ok) throw new Error(`category tree failed: ${r.status}`);
             return r.json();
         },
-        async parts({ filter, search, byField, predicates, footprint_ids, limit = 500, offset = 0 } = {}) {
+        async parts({ filter, search, byField, predicates, footprint_ids, category_ids, limit = 500, offset = 0 } = {}) {
             // Switch to the parametric endpoint when predicates OR a
-            // footprint multi-select is set. Footprint-only search is
-            // a valid use case (e.g., "find every 0805 part regardless
-            // of value") so we don't require predicates.length > 0.
+            // footprint OR a category multi-select is set. Any of
+            // these alone is a valid query.
             const hasPreds = predicates && predicates.length;
-            const hasFps = footprint_ids && footprint_ids.length;
-            if (hasPreds || hasFps) {
+            const hasFps   = footprint_ids && footprint_ids.length;
+            const hasCats  = category_ids && category_ids.length;
+            if (hasPreds || hasFps || hasCats) {
                 const body = { predicates: predicates || [], limit, offset };
-                if (hasFps) body.footprint_ids = footprint_ids;
+                if (hasFps)  body.footprint_ids = footprint_ids;
+                if (hasCats) body.category_ids = category_ids;
                 if (filter && filter.kind && filter.id != null) body[filter.kind] = filter.id;
                 if (search) body.search = search;
                 if (byField) Object.assign(body, byField);
@@ -4102,12 +4103,183 @@
     // pane (stock_mode, meta_only, distributor_id, price_min/max).
     // predicates holds the parametric-pane predicates (W9). When set,
     // the parts grid is populated from /api/parts/parametric instead.
-    let currentParts = { filter: null, search: "", byField: {}, predicates: [], footprint_ids: [] };
+    let currentParts = { filter: null, search: "", byField: {}, predicates: [], footprint_ids: [], category_ids: [] };
 
     /// Selected footprint ids in the parametric pane's footprint
     /// picker. Module-level so the popup can read/write while open
     /// and the main applyParametricSearch can read on submit.
     let selectedFootprintIds = [];
+    /// Selected category ids ("functional class") in the parametric
+    /// pane's class picker. Each picked category auto-expands to its
+    /// sub-tree on the backend, so picking a parent matches all
+    /// descendants. Module-level for the same reason as above.
+    let selectedCategoryIds = [];
+
+    /// Refresh the right-hand status label next to the category-
+    /// class picker button. Mirrors refreshParametricFpLabel.
+    function refreshParametricCatLabel() {
+        const lbl = $$("pk-parametric-cat-status");
+        if (!lbl) return;
+        if (!selectedCategoryIds.length) {
+            lbl.define("label", '<span style="color:#aaa">(none picked)</span>');
+        } else {
+            const flat = lookupsCache && lookupsCache.categories_tree
+                ? flattenCategoryTree(lookupsCache.categories_tree)
+                : [];
+            const names = selectedCategoryIds
+                .map((id) => {
+                    const m = flat.find((c) => c.id === id);
+                    // flattenCategoryTree pads the value with NBSPs
+                    // for indentation; trim for the inline label.
+                    return m ? (m.value || "").replace(/^[ \s]+/, "") : null;
+                })
+                .filter(Boolean);
+            const label = (names.length <= 4 && names.join(", ").length <= 60)
+                ? names.join(", ")
+                : `${names.length} classes`;
+            lbl.define("label", `<span>${escapeHtml(label)}</span>`);
+        }
+        lbl.refresh();
+    }
+
+    /// Shuttle popup for "functional class" picking. Same as
+    /// openFootprintPickerPopup but operates on PartCategory rows
+    /// (flattened with depth indentation). Each picked category will
+    /// expand to its sub-tree on the backend, so picking "Active
+    /// Components" includes every leaf under it.
+    function openCategoryPickerPopup(anchorBtn) {
+        const old = $$("pk-cat-popup");
+        if (old) old.destructor();
+
+        const flat = lookupsCache && lookupsCache.categories_tree
+            ? flattenCategoryTree(lookupsCache.categories_tree)
+            : [];
+        const allItems = flat.map((c) => ({ id: c.id, value: c.value }));
+        const selectedSet = new Set(selectedCategoryIds);
+        const availableData = allItems.filter((it) => !selectedSet.has(it.id));
+        const selectedData  = allItems.filter((it) =>  selectedSet.has(it.id));
+
+        function syncToModule() {
+            const lst = $$("pk-cat-selected");
+            if (!lst) return;
+            const ids = [];
+            lst.data.each((it) => { if (it && it.id) ids.push(it.id); });
+            selectedCategoryIds = ids;
+            refreshParametricCatLabel();
+            const avail = $$("pk-cat-available");
+            const aHdr = $$("pk-cat-avail-hdr");
+            const sHdr = $$("pk-cat-sel-hdr");
+            if (avail && aHdr) aHdr.define("label", `Available (${avail.count()})`);
+            if (lst && sHdr)   sHdr.define("label", `Selected (${lst.count()})`);
+            if (aHdr) aHdr.refresh();
+            if (sHdr) sHdr.refresh();
+        }
+
+        function moveItem(fromListId, toListId, itemId) {
+            const from = $$(fromListId);
+            const to   = $$(toListId);
+            if (!from || !to) return;
+            const item = from.getItem(itemId);
+            if (!item) return;
+            from.remove(itemId);
+            to.add({ id: item.id, value: item.value });
+            syncToModule();
+        }
+
+        const popup = webix.ui({
+            view: "popup",
+            id: "pk-cat-popup",
+            width: 600,
+            height: 420,
+            body: {
+                rows: [
+                    {
+                        cols: [
+                            {
+                                width: 290,
+                                rows: [
+                                    { view: "label", id: "pk-cat-avail-hdr",
+                                      label: `Available (${availableData.length})`,
+                                      css: "pk-pane-title" },
+                                    {
+                                        view: "search",
+                                        placeholder: "Filter classes…",
+                                        on: {
+                                            onTimedKeyPress: function () {
+                                                const list = $$("pk-cat-available");
+                                                if (!list) return;
+                                                const q = (this.getValue() || "").toLowerCase();
+                                                list.filter((item) =>
+                                                    !q || (item.value || "").toLowerCase().indexOf(q) !== -1);
+                                            },
+                                        },
+                                    },
+                                    {
+                                        view: "list",
+                                        id: "pk-cat-available",
+                                        select: false,
+                                        template: "#value#",
+                                        data: availableData,
+                                        scroll: "y",
+                                        on: {
+                                            onItemClick: function (id) {
+                                                moveItem("pk-cat-available", "pk-cat-selected", id);
+                                            },
+                                        },
+                                    },
+                                ],
+                            },
+                            {
+                                width: 290,
+                                rows: [
+                                    { view: "label", id: "pk-cat-sel-hdr",
+                                      label: `Selected (${selectedData.length})`,
+                                      css: "pk-pane-title" },
+                                    { height: 36, view: "label",
+                                      label: '<span class="pk-help-hint">Each pick includes all sub-classes</span>' },
+                                    {
+                                        view: "list",
+                                        id: "pk-cat-selected",
+                                        select: false,
+                                        template: "#value#",
+                                        data: selectedData,
+                                        scroll: "y",
+                                        on: {
+                                            onItemClick: function (id) {
+                                                moveItem("pk-cat-selected", "pk-cat-available", id);
+                                            },
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        view: "toolbar",
+                        cols: [
+                            { view: "button", value: "Clear all", width: 100,
+                              click: () => {
+                                  const sel = $$("pk-cat-selected");
+                                  if (!sel) return;
+                                  const ids = [];
+                                  sel.data.each((it) => { if (it && it.id) ids.push(it.id); });
+                                  ids.forEach((id) => moveItem("pk-cat-selected", "pk-cat-available", id));
+                              } },
+                            {},
+                            { view: "button", value: "Done", css: "webix_primary", width: 90,
+                              click: () => $$("pk-cat-popup") && $$("pk-cat-popup").hide() },
+                        ],
+                    },
+                ],
+            },
+        });
+
+        if (anchorBtn && anchorBtn.$view) {
+            popup.show(anchorBtn.$view);
+        } else {
+            popup.show();
+        }
+    }
 
     /// Refresh the right-hand status label next to the footprint
     /// picker button. "(none picked)" / "1 footprint" / "0603, 0805".
@@ -4486,6 +4658,54 @@
                     css: "pk-filters-pane",
                     hidden: true,
                     rows: [
+                        // Category (functional class) filter row —
+                        // multi-select with sub-tree expansion. Picks
+                        // are OR'd; each pick auto-includes every
+                        // descendant so picking "Active Components"
+                        // matches everything under it. Same shuttle
+                        // UX as the footprint picker below.
+                        {
+                            view: "toolbar",
+                            css: "pk-pane-toolbar",
+                            height: 38,
+                            cols: [
+                                {
+                                    view: "checkbox",
+                                    id: "pk-parametric-cat-toggle",
+                                    label: "",
+                                    labelRight: "Class",
+                                    labelWidth: 0,
+                                    width: 110,
+                                    on: {
+                                        onChange: function (newVal) {
+                                            const btn = $$("pk-parametric-cat-button");
+                                            if (!btn) return;
+                                            if (newVal) {
+                                                btn.enable();
+                                            } else {
+                                                btn.disable();
+                                                selectedCategoryIds = [];
+                                                refreshParametricCatLabel();
+                                            }
+                                        },
+                                    },
+                                },
+                                {
+                                    view: "button",
+                                    id: "pk-parametric-cat-button",
+                                    value: "Pick classes…",
+                                    width: 200,
+                                    disabled: true,
+                                    click: function () { openCategoryPickerPopup(this); },
+                                },
+                                {
+                                    view: "label",
+                                    id: "pk-parametric-cat-status",
+                                    label: "",
+                                    css: "pk-help-hint",
+                                },
+                            ],
+                        },
                         // Footprint filter row — multi-select, gated by
                         // a checkbox. Webix Standard (GPL) doesn't ship
                         // `multicombo` (Pro-only), so we use a button
@@ -5736,6 +5956,7 @@
         if ("byField" in opts) currentParts.byField = opts.byField;
         if ("predicates" in opts) currentParts.predicates = opts.predicates;
         if ("footprint_ids" in opts) currentParts.footprint_ids = opts.footprint_ids;
+        if ("category_ids" in opts) currentParts.category_ids = opts.category_ids;
         try {
             const json = await api.parts({
                 filter: currentParts.filter,
@@ -5743,6 +5964,7 @@
                 byField: currentParts.byField,
                 predicates: currentParts.predicates,
                 footprint_ids: currentParts.footprint_ids,
+                category_ids: currentParts.category_ids,
                 limit: 500,
                 offset: 0,
             });
@@ -6424,10 +6646,11 @@
             grid.getColumnConfig("unit_id").options = unitOptions;
             grid.refreshColumns();
 
-            // Footprint picker label initialization. The popup itself
-            // builds its data from lookupsCache.footprints on demand,
+            // Footprint + class picker label initialization. The
+            // popups build their data from lookupsCache on demand,
             // so nothing to seed here beyond rendering "(none picked)".
             refreshParametricFpLabel();
+            refreshParametricCatLabel();
 
             parametricLookupsReady = true;
         } catch (e) {
@@ -6468,10 +6691,15 @@
         const footprintIds = (fpToggle && fpToggle.getValue())
             ? selectedFootprintIds.slice()
             : [];
+        // Class (category) multi-select: same shape, separate state.
+        const catToggle = $$("pk-parametric-cat-toggle");
+        const categoryIds = (catToggle && catToggle.getValue())
+            ? selectedCategoryIds.slice()
+            : [];
 
         const rows = grid.serialize().filter((r) => (r.name || "").trim() && r.op);
-        if (!rows.length && footprintIds.length === 0) {
-            webix.message({ type: "error", text: "Add at least one predicate row, or pick a footprint." });
+        if (!rows.length && footprintIds.length === 0 && categoryIds.length === 0) {
+            webix.message({ type: "error", text: "Add at least one predicate row, or pick a class / footprint." });
             return;
         }
         const predicates = rows.map((r) => {
@@ -6490,19 +6718,25 @@
             }
             return p;
         });
-        loadParts({ predicates, footprint_ids: footprintIds });
+        loadParts({ predicates, footprint_ids: footprintIds, category_ids: categoryIds });
     }
 
     function resetParametricSearch() {
         const grid = $$("pk-parametric-grid");
         if (grid) grid.clearAll();
-        const fpToggle = $$("pk-parametric-fp-toggle");
-        const fpBtn    = $$("pk-parametric-fp-button");
-        if (fpToggle) fpToggle.setValue(0);
-        if (fpBtn)    fpBtn.disable();
+        const fpToggle  = $$("pk-parametric-fp-toggle");
+        const fpBtn     = $$("pk-parametric-fp-button");
+        const catToggle = $$("pk-parametric-cat-toggle");
+        const catBtn    = $$("pk-parametric-cat-button");
+        if (fpToggle)  fpToggle.setValue(0);
+        if (fpBtn)     fpBtn.disable();
+        if (catToggle) catToggle.setValue(0);
+        if (catBtn)    catBtn.disable();
         selectedFootprintIds = [];
+        selectedCategoryIds = [];
         refreshParametricFpLabel();
-        loadParts({ predicates: [], footprint_ids: [] });
+        refreshParametricCatLabel();
+        loadParts({ predicates: [], footprint_ids: [], category_ids: [] });
     }
 
     function resetFilters() {
