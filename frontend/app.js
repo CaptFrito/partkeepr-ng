@@ -47,7 +47,13 @@
                 const body = { predicates: predicates || [], limit, offset };
                 if (hasFps)  body.footprint_ids = footprint_ids;
                 if (hasCats) body.category_ids = category_ids;
-                if (filter && filter.kind && filter.id != null) body[filter.kind] = filter.id;
+                // Legacy single-id filter from a left-tree click. Tree
+                // ids come back as strings ("83"), but the backend
+                // ParametricBody expects i32 — coerce.
+                if (filter && filter.kind && filter.id != null) {
+                    const n = parseInt(filter.id, 10);
+                    body[filter.kind] = Number.isFinite(n) ? n : filter.id;
+                }
                 if (search) body.search = search;
                 if (byField) Object.assign(body, byField);
                 const r = await fetch("/api/parts/parametric", {
