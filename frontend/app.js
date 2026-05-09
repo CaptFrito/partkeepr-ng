@@ -852,12 +852,11 @@
         const part = opts.part;
         const dist = opts.distributor;
 
-        // Storage locations. (unbinned) = id 0 → null on submit, for
-        // when the operator hasn't decided where to put it yet.
-        const storageOptions = [{ id: "_unbinned", value: "(unassigned)" }].concat(
-            (lookupsCache && lookupsCache.storage_locations || [])
-                .map((s) => ({ id: s.id, value: s.name }))
-        );
+        // Storage locations from cache. Operator-convention bin —
+        // typically named "(NOWHERE)" — is the default for new
+        // entries via defaultStorageLocationId().
+        const storageOptions = (lookupsCache && lookupsCache.storage_locations || [])
+            .map((s) => ({ id: s.id, value: s.name }));
 
         const distLine = dist
             ? `<div style="color:#6a7a8a;font-size:12px">From <b>${escapeHtml(dist.name)}</b>` +
@@ -891,7 +890,7 @@
                       options: SCAN_FORM_OPTIONS, value: opts.default_form || "Reel" },
                     { view: "richselect", name: "storage_location_id", label: "Storage", labelWidth: 130,
                       options: storageOptions,
-                      value: storageOptions.length ? storageOptions[0].id : null },
+                      value: defaultStorageLocationId() },
                     { view: "text", name: "lot_number", label: "Lot", labelWidth: 130,
                       value: opts.lot_number || "" },
                     { view: "text", name: "date_code", label: "Date code", labelWidth: 130,
@@ -1092,6 +1091,22 @@
                     "Esc to cancel</div></div>",
             },
         }).show();
+    }
+
+    /// Look up the operator's "default / not-yet-placed" storage
+    /// location by convention. partkeepr-ng users historically use
+    /// a bin called something like "NOWHERE" or "(NOWHERE)" as the
+    /// catch-all. Fall back to the first cached location if no such
+    /// bin exists. Used as the default for new packaging entries
+    /// across the scan-receive, + Add stock, Split / move, and part
+    /// editor flows so an operator never has to pick "where does
+    /// this go" just to record stock.
+    function defaultStorageLocationId() {
+        const list = (lookupsCache && lookupsCache.storage_locations) || [];
+        if (list.length === 0) return null;
+        const m = list.find((s) => /(^|\b|\()NOWHERE(\b|\))/i.test(s.name || ""));
+        if (m) return m.id;
+        return list[0].id;
     }
 
     /// Some HID scanners (Inateck BCST-47 in default mode) emit
@@ -6589,17 +6604,14 @@
                 },
             });
             const formOpts = SCAN_FORM_OPTIONS.slice();  // Reel/CutTape/Loose/...
-            // "(unbinned)" sentinel = id 0 → null on submit. Operator
-            // can record stock without committing to a specific
-            // storage location yet.
-            const storageOpts = [{ id: "_unbinned", value: "(unassigned)" }].concat(
-                (lookupsCache && lookupsCache.storage_locations || [])
-                    .map((s) => ({ id: s.id, value: s.name }))
-            );
+            const storageOpts = (lookupsCache && lookupsCache.storage_locations || [])
+                .map((s) => ({ id: s.id, value: s.name }));
+            // Default storage = part's primary location if set, else
+            // the operator's "(NOWHERE)"-style catch-all bin.
             const defaultStorage = (currentPart.storage_location_id
                 && storageOpts.some((s) => s.id === currentPart.storage_location_id))
                 ? currentPart.storage_location_id
-                : "_unbinned";
+                : defaultStorageLocationId();
             elements.push({
                 view: "richselect", id: "pk-stock-form", label: "Form", labelWidth: 150,
                 disabled: true, options: formOpts, value: "Loose",
@@ -6874,7 +6886,8 @@
                     { view: "richselect", name: "form", label: "Into form", labelWidth: 130,
                       options: formOptions, value: src.form === "Reel" ? "Loose" : "Reel" },
                     { view: "richselect", name: "storage_location_id", label: "Into storage", labelWidth: 130,
-                      options: storageOptions, value: src.storage_location_id || null },
+                      options: storageOptions,
+                      value: src.storage_location_id || defaultStorageLocationId() },
                     { view: "text", name: "lot_number", label: "Lot", labelWidth: 130,
                       value: src.lot_number || "" },
                     { view: "text", name: "comment", label: "Comment", labelWidth: 130,
@@ -7186,12 +7199,10 @@
 
         const categoryOptions = flattenCategoryTree(lookups.categories_tree);
         const footprintOptions = lookups.footprints.map((f) => ({ id: f.id, value: f.name }));
-        // (unbinned) sentinel = id 0 → null; PartStorageLocation
-        // rows (Container rows) can be unbinned, so the picker
-        // needs an explicit option for that case.
-        const storageOptions = [{ id: "_unbinned", value: "(unassigned)" }].concat(
-            lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }))
-        );
+        // Storage locations from cache. Operator convention is to use
+        // a "(NOWHERE)" bin as the catch-all for not-yet-placed parts;
+        // defaultStorageLocationId() returns its id.
+        const storageOptions = lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }));
         const partUnitOptions = lookups.part_units.map((u) => ({
             id: u.id, value: u.name + (u.short_name ? ` (${u.short_name})` : ""),
         }));
@@ -7682,9 +7693,7 @@
                                                     editor: "richselect",
                                                     options: storageOptions,
                                                     template: function (o) {
-                                                        if (!o.storage_location_id) {
-                                                            return `<span class="pk-help-hint">(unassigned)</span>`;
-                                                        }
+                                                        if (!o.storage_location_id) return "";
                                                         const name = storageLocNameById.get(String(o.storage_location_id));
                                                         return name ? escapeHtml(name) : "";
                                                     },
