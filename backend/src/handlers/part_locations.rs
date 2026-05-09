@@ -33,8 +33,8 @@ const VALID_FORMS: &[&str] = &[
 pub struct PartLocationView {
     pub id: i32,
     #[sqlx(rename = "storageLocation_id")]
-    pub storage_location_id: i32,
-    pub storage_location_name: String,
+    pub storage_location_id: Option<i32>,
+    pub storage_location_name: Option<String>,
     /// Breadcrumb path of the storage location's category (e.g.
     /// "Root ➤ Office ➤ Shelf B"), via StorageLocationCategory.categoryPath.
     pub storage_location_path: Option<String>,
@@ -51,7 +51,11 @@ pub struct PartLocationView {
 
 #[derive(Debug, Deserialize)]
 pub struct PartLocationWrite {
-    pub storage_location_id: i32,
+    /// Optional: a Container can be "loose, not yet binned" — the
+    /// operator hasn't decided which physical location it goes to.
+    /// Schema column is now nullable to match.
+    #[serde(default)]
+    pub storage_location_id: Option<i32>,
     pub form: String,
     pub quantity: i32,
     #[serde(default)]
@@ -62,7 +66,8 @@ pub struct PartLocationWrite {
 
 /// SQL fragment used by both `list` here and `parts::detail` (for the
 /// embedded `locations` field). Keeping it as one literal so the
-/// shape can't drift.
+/// shape can't drift. LEFT JOIN to StorageLocation since
+/// storageLocation_id is nullable ((unbinned) containers).
 pub const LIST_SELECT_SQL: &str = "
     SELECT psl.id, \
            psl.storageLocation_id, \
@@ -76,7 +81,7 @@ pub const LIST_SELECT_SQL: &str = "
            psl.lastModified, \
            psl.user_id \
       FROM PartStorageLocation psl \
-      JOIN StorageLocation sl ON sl.id = psl.storageLocation_id \
+      LEFT JOIN StorageLocation sl ON sl.id = psl.storageLocation_id \
       LEFT JOIN StorageLocationCategory slc ON slc.id = sl.category_id \
      WHERE psl.part_id = ? \
      ORDER BY psl.form ASC, psl.quantity DESC, psl.id ASC";
@@ -107,15 +112,18 @@ pub async fn create(
     if part_exists == 0 {
         return Err(AppError::NotFound("part"));
     }
-    let loc_exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM StorageLocation WHERE id = ?",
-    )
-    .bind(req.storage_location_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if loc_exists == 0 {
-        return Err(AppError::BadRequest("storage location not found"));
+    if let Some(sid) = req.storage_location_id {
+        let loc_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM StorageLocation WHERE id = ?",
+        )
+        .bind(sid)
+        .fetch_one(&mut *tx)
+        .await?;
+        if loc_exists == 0 {
+            return Err(AppError::BadRequest("storage location not found"));
+        }
     }
+    // None → unbinned, no lookup needed.
 
     let now = Utc::now().naive_utc();
     let res = sqlx::query(
@@ -149,14 +157,16 @@ pub async fn update(
     validate_write(&req)?;
 
     let mut tx = pool.begin().await?;
-    let loc_exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM StorageLocation WHERE id = ?",
-    )
-    .bind(req.storage_location_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if loc_exists == 0 {
-        return Err(AppError::BadRequest("storage location not found"));
+    if let Some(sid) = req.storage_location_id {
+        let loc_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM StorageLocation WHERE id = ?",
+        )
+        .bind(sid)
+        .fetch_one(&mut *tx)
+        .await?;
+        if loc_exists == 0 {
+            return Err(AppError::BadRequest("storage location not found"));
+        }
     }
 
     let now = Utc::now().naive_utc();
@@ -211,8 +221,13 @@ fn validate_write(r: &PartLocationWrite) -> Result<(), AppError> {
     if r.quantity < 0 {
         return Err(AppError::BadRequest("quantity must be >= 0"));
     }
-    if r.storage_location_id <= 0 {
-        return Err(AppError::BadRequest("storage_location_id is required"));
+    // storage_location_id is now optional ((unbinned) containers).
+    // Reject only an explicit 0/-N which would never match a real
+    // StorageLocation row.
+    if let Some(sid) = r.storage_location_id {
+        if sid <= 0 {
+            return Err(AppError::BadRequest("storage_location_id must be > 0 or omitted"));
+        }
     }
     Ok(())
 }

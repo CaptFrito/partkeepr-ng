@@ -852,11 +852,12 @@
         const part = opts.part;
         const dist = opts.distributor;
 
-        // Storage locations from cache. Operator picks where the
-        // container goes; the part's existing storage_location_id (if
-        // any) makes the most-likely default.
-        const storageOptions = (lookupsCache && lookupsCache.storage_locations || [])
-            .map((s) => ({ id: s.id, value: s.name }));
+        // Storage locations. (unbinned) = id 0 → null on submit, for
+        // when the operator hasn't decided where to put it yet.
+        const storageOptions = [{ id: 0, value: "(unbinned)" }].concat(
+            (lookupsCache && lookupsCache.storage_locations || [])
+                .map((s) => ({ id: s.id, value: s.name }))
+        );
 
         const distLine = dist
             ? `<div style="color:#6a7a8a;font-size:12px">From <b>${escapeHtml(dist.name)}</b>` +
@@ -916,10 +917,7 @@
                 webix.message({ type: "error", text: "Quantity must be > 0." });
                 return;
             }
-            if (!v.storage_location_id) {
-                webix.message({ type: "error", text: "Pick a storage location." });
-                return;
-            }
+            const storageId = parseInt(v.storage_location_id, 10);
             const body = {
                 stock_level: qty,
                 comment: opts.sales_order_number && dist
@@ -928,7 +926,8 @@
                 correction: false,
                 create_storage_row: true,
                 form: v.form || "Reel",
-                storage_location_id: parseInt(v.storage_location_id, 10),
+                // 0 → unbinned (null storage)
+                storage_location_id: storageId > 0 ? storageId : null,
                 lot_number: (v.lot_number || "").trim() || null,
                 date_code: (v.date_code || "").trim() || null,
             };
@@ -6590,12 +6589,17 @@
                 },
             });
             const formOpts = SCAN_FORM_OPTIONS.slice();  // Reel/CutTape/Loose/...
-            const storageOpts = (lookupsCache && lookupsCache.storage_locations || [])
-                .map((s) => ({ id: s.id, value: s.name }));
+            // "(unbinned)" sentinel = id 0 → null on submit. Operator
+            // can record stock without committing to a specific
+            // storage location yet.
+            const storageOpts = [{ id: 0, value: "(unbinned)" }].concat(
+                (lookupsCache && lookupsCache.storage_locations || [])
+                    .map((s) => ({ id: s.id, value: s.name }))
+            );
             const defaultStorage = (currentPart.storage_location_id
                 && storageOpts.some((s) => s.id === currentPart.storage_location_id))
                 ? currentPart.storage_location_id
-                : (storageOpts[0] && storageOpts[0].id) || null;
+                : 0;  // (unbinned)
             elements.push({
                 view: "richselect", id: "pk-stock-form", label: "Form", labelWidth: 150,
                 disabled: true, options: formOpts, value: "Loose",
@@ -6706,13 +6710,10 @@
                 const wantContainer = !!$$("pk-stock-container-toggle").getValue();
                 if (wantContainer) {
                     const storageId = parseInt($$("pk-stock-storage").getValue(), 10);
-                    if (!storageId) {
-                        webix.message({ type: "error", text: "Pick a storage location for the container." });
-                        return;
-                    }
                     body.create_storage_row = true;
                     body.form = $$("pk-stock-form").getValue() || "Loose";
-                    body.storage_location_id = storageId;
+                    // 0 sentinel → leave NULL (unbinned).
+                    body.storage_location_id = storageId > 0 ? storageId : null;
                     const lot = ($$("pk-stock-lot").getValue() || "").trim();
                     const dc  = ($$("pk-stock-date").getValue() || "").trim();
                     if (lot) body.lot_number = lot;
@@ -6899,10 +6900,10 @@
                 webix.message({ type: "error", text: `Quantity must be 1..${srcQty}.` });
                 return;
             }
-            if (!v.storage_location_id) {
-                webix.message({ type: "error", text: "Pick a storage location." });
-                return;
-            }
+            // Storage is optional now; null = unbinned. The form
+            // schema (richselect over storageOptions which includes
+            // an "(unbinned)" id=0 option) coerces empty selection
+            // to null already.
             // 1. Subtract from source row (or remove entirely when N == srcQty).
             const remaining = srcQty - n;
             if (remaining === 0) {
@@ -6911,10 +6912,11 @@
                 grid.updateItem(sel, { quantity: remaining });
             }
             // 2. Add a new row with the moved quantity.
+            const storageId = parseInt(v.storage_location_id, 10);
             const newRow = {
                 id: webix.uid(),
                 form: v.form || "Loose",
-                storage_location_id: parseInt(v.storage_location_id, 10) || null,
+                storage_location_id: storageId > 0 ? storageId : null,
                 quantity: n,
                 lot_number: (v.lot_number || "").trim(),
                 comment: (v.comment || "").trim(),
@@ -7184,7 +7186,12 @@
 
         const categoryOptions = flattenCategoryTree(lookups.categories_tree);
         const footprintOptions = lookups.footprints.map((f) => ({ id: f.id, value: f.name }));
-        const storageOptions = lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }));
+        // (unbinned) sentinel = id 0 → null; PartStorageLocation
+        // rows (Container rows) can be unbinned, so the picker
+        // needs an explicit option for that case.
+        const storageOptions = [{ id: 0, value: "(unbinned)" }].concat(
+            lookups.storage_locations.map((s) => ({ id: s.id, value: s.name }))
+        );
         const partUnitOptions = lookups.part_units.map((u) => ({
             id: u.id, value: u.name + (u.short_name ? ` (${u.short_name})` : ""),
         }));
@@ -7675,7 +7682,9 @@
                                                     editor: "richselect",
                                                     options: storageOptions,
                                                     template: function (o) {
-                                                        if (!o.storage_location_id) return "";
+                                                        if (!o.storage_location_id) {
+                                                            return `<span class="pk-help-hint">(unbinned)</span>`;
+                                                        }
                                                         const name = storageLocNameById.get(String(o.storage_location_id));
                                                         return name ? escapeHtml(name) : "";
                                                     },

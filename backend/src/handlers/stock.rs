@@ -98,11 +98,24 @@ pub async fn create_stock_entry(
     // physical container (a fresh reel, a cut-tape strip, a tube,
     // ...). Only on positive deltas (a "received" event). Form must
     // be one of the ENUM values; default Loose if missing.
-    if req.create_storage_row && req.stock_level > 0 {
-        let storage_location_id = req.storage_location_id
-            .ok_or(AppError::BadRequest(
-                "storage_location_id is required when create_storage_row=true",
-            ))?;
+    // Auto-create a Loose row when this part has no Container rows
+    // yet — covers the case where existing stock was already there
+    // before the Containers feature was added (or wasn't auto-
+    // backfilled by the migration). Skips when the operator
+    // explicitly opted into a different form via create_storage_row.
+    let want_storage_row = req.create_storage_row || (req.stock_level > 0 && {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM PartStorageLocation WHERE part_id = ?",
+        )
+        .bind(part_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        count == 0
+    });
+
+    if want_storage_row && req.stock_level > 0 {
+        // storage_location_id is nullable now; "(unbinned)" is allowed.
+        let storage_location_id = req.storage_location_id;
         let form = req.form.as_deref().unwrap_or("Loose");
         // Build the row's comment from lot/date + operator note, since
         // the schema has no dedicated date_code column. Lives on the
