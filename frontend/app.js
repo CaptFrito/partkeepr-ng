@@ -9458,7 +9458,7 @@
     //  Operator types a Digi-Key Sales Order #, hits Fetch. We call
     //  /order-status which fetches the order via Digi-Key OrderStatus
     //  API and joins line items against PartDistributor on
-    //  (distributor=Digi-Key, orderNumber=line.digikey_pn). Each line
+    //  (distributor=Digi-Key, orderNumber=line.distributor_pn). Each line
     //  shows: ✓ apply | DK PN | MPN | qty shipped | unit price |
     //  match status. Operator unchecks lines they don't want, edits
     //  per-line quantity (defaults to qty_shipped), clicks Apply.
@@ -9553,7 +9553,7 @@
                                             // Update the SKU column header live.
                                             const grid = $$("pk-dk-rcv-grid");
                                             if (grid) {
-                                                grid.config.columns.find(c => c.id === "digikey_pn").header = skuHeaderFor(newSrc);
+                                                grid.config.columns.find(c => c.id === "distributor_pn").header = skuHeaderFor(newSrc);
                                                 grid.refreshColumns();
                                             }
                                             refreshSummary();
@@ -9612,7 +9612,7 @@
                                 css: "right",
                             },
                             { id: "line_number", header: "Line", width: 56, css: "right" },
-                            { id: "digikey_pn", header: skuHeaderFor(source), width: 150 },
+                            { id: "distributor_pn", header: skuHeaderFor(source), width: 150 },
                             { id: "mpn", header: "MPN", width: 170 },
                             {
                                 id: "_match",
@@ -9866,7 +9866,7 @@
         function importLine(idx) {
             const li = preview && preview.lines[idx];
             if (!li) return;
-            const mpn = (li.mpn || li.digikey_pn || "").trim();
+            const mpn = (li.mpn || li.distributor_pn || "").trim();
             if (!mpn) {
                 webix.message({ type: "error", text: "No MPN/SKU on this line." });
                 return;
@@ -9878,7 +9878,7 @@
                 // *order line's* distributor SKU. Without this, Mouser
                 // sometimes returns MouserPartNumber="N/A" and the line
                 // never matches on re-fetch.
-                forceDistributorPn: li.digikey_pn,
+                forceDistributorPn: li.distributor_pn,
                 onImported: async () => {
                     // Refresh the parts grid so future stock-entries can land.
                     try { await loadParts({ search: "" }); } catch (_) {}

@@ -690,7 +690,7 @@ pub async fn order_status(
 
         lines.push(OrderStatusLine {
             line_number: li.po_line_item_number.clone(),
-            digikey_pn: dk_pn.to_string(),
+            distributor_pn: dk_pn.to_string(),
             mpn: li.manufacturer_part_number.clone(),
             manufacturer: li.manufacturer.clone(),
             description: li.product_description.clone(),

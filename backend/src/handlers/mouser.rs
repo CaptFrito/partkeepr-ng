@@ -567,7 +567,7 @@ pub async fn order_status(
         // can edit per-line before applying.
         lines.push(MouserOrderStatusLine {
             line_number: format!("{}", idx + 1),
-            digikey_pn: mouser_pn.to_string(),  // shared field name; "Distributor SKU"
+            distributor_pn: mouser_pn.to_string(),
             mpn: ol.product_info.manufacturer_part_number.clone(),
             manufacturer: ol.product_info.manufacturer_name.clone(),
             description: ol.product_info.part_description.clone(),

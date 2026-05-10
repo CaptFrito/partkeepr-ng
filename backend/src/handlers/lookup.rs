@@ -136,10 +136,9 @@ pub struct OrderStatusResponse {
 pub struct OrderStatusLine {
     pub line_number: String,
     /// Distributor SKU. For Digi-Key this is the DK part #;
-    /// for Mouser it's the Mouser part #. Field name is historical
-    /// (DK shipped first); the frontend treats it as a generic
-    /// "distributor SKU" string.
-    pub digikey_pn: String,
+    /// for Mouser it's the Mouser part #. Frontend treats it
+    /// as a generic distributor-SKU string.
+    pub distributor_pn: String,
     pub mpn: String,
     pub manufacturer: String,
     pub description: String,
