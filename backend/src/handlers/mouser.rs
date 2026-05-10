@@ -96,15 +96,7 @@ struct MouserError {
 /// fields, not nulls. This deserializer coerces both null and missing
 /// to an empty string so downstream code can treat all "no value"
 /// cases uniformly.
-fn null_to_empty_string<'de, D>(de: D) -> Result<String, D::Error>
-where D: serde::Deserializer<'de> {
-    Ok(Option::<String>::deserialize(de)?.unwrap_or_default())
-}
-
-fn null_to_empty_vec<'de, D, T>(de: D) -> Result<Vec<T>, D::Error>
-where D: serde::Deserializer<'de>, T: serde::Deserialize<'de> {
-    Ok(Option::<Vec<T>>::deserialize(de)?.unwrap_or_default())
-}
+use crate::handlers::serde_helpers::{null_to_empty_string, null_to_empty_vec};
 
 /// What Mouser returns per part. Field names are PascalCase per their
 /// API; we use serde rename to map. Only the fields we actually consume
@@ -496,7 +488,6 @@ use crate::handlers::lookup::{
     OrderStatusLine as MouserOrderStatusLine,
     OrderReceiveRequest as MouserOrderReceiveRequest,
     OrderReceiveResponse as MouserOrderReceiveResponse,
-    OrderReceiveResult as MouserOrderReceiveResult,
 };
 
 pub async fn order_status(
@@ -618,66 +609,12 @@ pub async fn order_receive(
     }
 
     let mut tx = pool.begin().await?;
-    let mouser_id = match sqlx::query_as::<_, (i32,)>(
-        "SELECT id FROM Distributor WHERE LOWER(name) = 'mouser' LIMIT 1",
-    ).fetch_optional(&mut *tx).await? {
-        Some((id,)) => id,
-        None => {
-            let res = sqlx::query(
-                "INSERT INTO Distributor (name, url, enabledForReports) \
-                 VALUES ('Mouser', 'https://www.mouser.com', 1)",
-            ).execute(&mut *tx).await?;
-            res.last_insert_id() as i32
-        }
-    };
-    let so_str = req.order_id.to_string();
-
-    let mut results: Vec<MouserOrderReceiveResult> = Vec::with_capacity(req.lines.len());
-    for (idx, line) in req.lines.iter().enumerate() {
-        let default_comment = format!("Mouser SO #{} line {}", req.order_id, idx + 1);
-        let comment = line.comment.as_deref().filter(|s| !s.trim().is_empty())
-            .unwrap_or(&default_comment);
-
-        // Slice 13d: parallel to digikey::order_receive — mint a PSL
-        // row per line unless the operator opted out (already scanned
-        // this reel earlier).
-        let psl_id: Option<i32> = if line.skip_psl_row {
-            None
-        } else {
-            let form = line.form.as_deref().unwrap_or("Loose");
-            Some(crate::handlers::stock::insert_psl_row_in_tx(
-                &mut tx,
-                line.part_id,
-                form,
-                line.storage_location_id,
-                line.quantity,
-                None, None,
-                Some(comment),
-                user.user_id,
-            ).await?)
-        };
-
-        let (stock_after, low_stock) = crate::handlers::stock::apply_stock_change_in_tx(
-            &mut tx,
-            line.part_id,
-            line.quantity,
-            line.price,
-            Some(comment),
-            false,
-            user.user_id,
-            crate::handlers::stock::OrderAttribution {
-                distributor_id: Some(mouser_id),
-                sales_order_number: Some(&so_str),
-            },
-            psl_id,
-        ).await?;
-        results.push(MouserOrderReceiveResult {
-            part_id: line.part_id,
-            quantity: line.quantity,
-            stock_after,
-            low_stock,
-        });
-    }
+    let mouser_id = crate::handlers::lookup::find_or_create_distributor(
+        &mut tx, "Mouser", "https://www.mouser.com",
+    ).await?;
+    let results = crate::handlers::lookup::apply_order_receive_lines(
+        &mut tx, mouser_id, "Mouser", req.order_id, &req.lines, user.user_id,
+    ).await?;
     tx.commit().await?;
     tracing::info!(
         order_id = req.order_id, applied = results.len(),

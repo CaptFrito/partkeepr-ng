@@ -243,6 +243,124 @@ pub struct DistributorIdentity {
     pub url:  &'static str,    // "https://www.mouser.com" etc.
 }
 
+/// Apply an operator-confirmed list of order-receive lines as
+/// (StockEntry + optional PartStorageLocation) inserts inside the
+/// caller's transaction. Used by both `digikey::order_receive` and
+/// `mouser::order_receive` — they differ only in distributor name,
+/// distributor URL, and the upstream API call that produces the
+/// preview; the per-line application logic is identical and lives
+/// here.
+///
+/// `distributor_label` is used for the default StockEntry comment
+/// ("Digi-Key SO #N line K"); the operator's explicit `comment`
+/// override on each line takes precedence when non-empty.
+///
+/// Per-line behavior:
+/// - If `skip_psl_row` is false (default), mint a `PartStorageLocation`
+///   row capturing the physical container that arrived (form / storage
+///   from the request, lot/date NULL since OrderStatus doesn't expose
+///   them). The new row's id is recorded on the StockEntry FK.
+/// - If `skip_psl_row` is true, just insert a StockEntry — used when
+///   the operator already scanned the reel separately via the
+///   scan-receive flow and doesn't want a duplicate row.
+/// - The StockEntry is always attributed to `(distributor_id,
+///   sales_order_number)` so the part-detail Receipts panel
+///   aggregates correctly and partial shipments tracked across
+///   sessions don't double-count.
+pub async fn apply_order_receive_lines(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    distributor_id: i32,
+    distributor_label: &str,
+    sales_order_id: i64,
+    lines: &[OrderReceiveLine],
+    user_id: i32,
+) -> Result<Vec<OrderReceiveResult>, AppError> {
+    use crate::handlers::stock::{apply_stock_change_in_tx, insert_psl_row_in_tx, OrderAttribution};
+
+    let so_str = sales_order_id.to_string();
+    let mut results: Vec<OrderReceiveResult> = Vec::with_capacity(lines.len());
+
+    for (idx, line) in lines.iter().enumerate() {
+        let default_comment = format!(
+            "{} SO #{} line {}", distributor_label, sales_order_id, idx + 1,
+        );
+        let comment = line.comment.as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(&default_comment);
+
+        let psl_id: Option<i32> = if line.skip_psl_row {
+            None
+        } else {
+            let form = line.form.as_deref().unwrap_or("Loose");
+            Some(insert_psl_row_in_tx(
+                tx,
+                line.part_id,
+                form,
+                line.storage_location_id,
+                line.quantity,
+                None, // lot — not exposed in DK/Mouser OrderStatus
+                None, // date code — same
+                Some(comment),
+                user_id,
+            ).await?)
+        };
+
+        let (stock_after, low_stock) = apply_stock_change_in_tx(
+            tx,
+            line.part_id,
+            line.quantity,
+            line.price,
+            Some(comment),
+            false, // not a correction — real receipt
+            user_id,
+            OrderAttribution {
+                distributor_id: Some(distributor_id),
+                sales_order_number: Some(&so_str),
+            },
+            psl_id,
+        ).await?;
+
+        results.push(OrderReceiveResult {
+            part_id: line.part_id,
+            quantity: line.quantity,
+            stock_after,
+            low_stock,
+        });
+    }
+
+    Ok(results)
+}
+
+/// Find a Distributor row by case-insensitive name; create it if
+/// missing using the supplied URL. Returns the row id. Used by every
+/// import / order-receive handler so the operator never has to
+/// pre-seed the Distributor table — the first Mouser/Digi-Key import
+/// or order-receive auto-creates the row.
+pub async fn find_or_create_distributor(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    name: &str,
+    url: &str,
+) -> Result<i32, AppError> {
+    let existing: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM Distributor WHERE LOWER(name) = LOWER(?) LIMIT 1",
+    )
+    .bind(name)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some((id,)) = existing {
+        return Ok(id);
+    }
+    let res = sqlx::query(
+        "INSERT INTO Distributor (name, url, enabledForReports) \
+         VALUES (?, ?, 1)",
+    )
+    .bind(name)
+    .bind(url)
+    .execute(&mut **tx)
+    .await?;
+    Ok(res.last_insert_id() as i32)
+}
+
 /// Shared import path used by both `handlers::mouser::import` and
 /// `handlers::digikey::import`. Atomically creates a Part + its
 /// PartManufacturer / PartDistributor / PartParameter children;
@@ -291,26 +409,9 @@ pub async fn import_lookup_result(
 
     // 2. Distributor — find by case-insensitive name; auto-create if
     //    missing. Source-specific (Mouser / Digi-Key / etc.).
-    let dist_existing: Option<(i32,)> = sqlx::query_as(
-        "SELECT id FROM Distributor WHERE LOWER(name) = LOWER(?) LIMIT 1",
-    )
-    .bind(distributor.name)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let distributor_id = match dist_existing {
-        Some((id,)) => id,
-        None => {
-            let res = sqlx::query(
-                "INSERT INTO Distributor (name, url, enabledForReports) \
-                 VALUES (?, ?, 1)",
-            )
-            .bind(distributor.name)
-            .bind(distributor.url)
-            .execute(&mut *tx)
-            .await?;
-            res.last_insert_id() as i32
-        }
-    };
+    let distributor_id = find_or_create_distributor(
+        &mut tx, distributor.name, distributor.url,
+    ).await?;
 
     // 3. Part — Name = MPN (matches existing convention; longer text
     //    lives in description).

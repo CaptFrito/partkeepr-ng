@@ -23,6 +23,7 @@ pub mod part_locations;
 pub mod parts;
 pub mod printing;
 pub mod projects;
+pub mod serde_helpers;
 pub mod stock;
 pub mod storage;
 pub mod storage_locations;

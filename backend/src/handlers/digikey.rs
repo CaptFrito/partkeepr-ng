@@ -319,31 +319,9 @@ async fn digikey_request(
 //  deserialize the response over a single inconsistent field.
 // ===========================================================================
 
-fn de_int_or_string<'de, D>(de: D) -> Result<Option<i32>, D::Error>
-where D: serde::Deserializer<'de> {
-    use serde::de::Error;
-    match Option::<serde_json::Value>::deserialize(de)? {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(serde_json::Value::Number(n)) => Ok(n.as_i64().map(|v| v as i32)),
-        Some(serde_json::Value::String(s)) => Ok(s.trim().parse().ok()),
-        Some(other) => Err(D::Error::custom(format!(
-            "expected int or string, got {other:?}"
-        ))),
-    }
-}
-
-fn de_int_or_string_required<'de, D>(de: D) -> Result<i32, D::Error>
-where D: serde::Deserializer<'de> {
-    Ok(de_int_or_string(de)?.unwrap_or(0))
-}
-
-/// Coerce `null` → `""`. Digi-Key v4 OrderStatus fields like
-/// CustomerReference / PurchaseOrder are routinely null on orders
-/// without a PO; without this they fail deserialization as `String`.
-fn null_to_empty_string<'de, D>(de: D) -> Result<String, D::Error>
-where D: serde::Deserializer<'de> {
-    Ok(Option::<String>::deserialize(de)?.unwrap_or_default())
-}
+use crate::handlers::serde_helpers::{
+    de_int_or_string, de_int_or_string_required, null_to_empty_string,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -639,7 +617,7 @@ async fn fetch_order_status(
 
 use crate::handlers::lookup::{
     OrderStatusRequest, OrderStatusResponse, OrderStatusLine,
-    OrderReceiveRequest, OrderReceiveResponse, OrderReceiveResult,
+    OrderReceiveRequest, OrderReceiveResponse,
 };
 
 pub async fn order_status(
@@ -757,72 +735,12 @@ pub async fn order_receive(
 
     let mut tx = pool.begin().await?;
 
-    // Resolve Digi-Key distributor_id once. If the row doesn't exist
-    // yet (operator never imported via Digi-Key, but is using an
-    // SO# import flow somehow), create it — same auto-create the
-    // import path uses.
-    let dk_id = match sqlx::query_as::<_, (i32,)>(
-        "SELECT id FROM Distributor WHERE LOWER(name) = 'digi-key' LIMIT 1",
-    ).fetch_optional(&mut *tx).await? {
-        Some((id,)) => id,
-        None => {
-            let res = sqlx::query(
-                "INSERT INTO Distributor (name, url, enabledForReports) \
-                 VALUES ('Digi-Key', 'https://www.digikey.com', 1)",
-            ).execute(&mut *tx).await?;
-            res.last_insert_id() as i32
-        }
-    };
-    let so_str = req.order_id.to_string();
-
-    let mut results: Vec<OrderReceiveResult> = Vec::with_capacity(req.lines.len());
-    for (idx, line) in req.lines.iter().enumerate() {
-        let default_comment = format!("Digi-Key SO #{} line {}", req.order_id, idx + 1);
-        let comment = line.comment.as_deref().filter(|s| !s.trim().is_empty())
-            .unwrap_or(&default_comment);
-
-        // Slice 13d: mint a PSL row per line representing the physical
-        // container that arrived — unless the operator explicitly opted
-        // out (already scanned this reel separately via slice 13b's
-        // scan-receive flow). Form defaults to "Loose" if unspecified.
-        let psl_id: Option<i32> = if line.skip_psl_row {
-            None
-        } else {
-            let form = line.form.as_deref().unwrap_or("Loose");
-            Some(crate::handlers::stock::insert_psl_row_in_tx(
-                &mut tx,
-                line.part_id,
-                form,
-                line.storage_location_id,
-                line.quantity,
-                None, // lot — not exposed in DK OrderStatus
-                None, // date code — not exposed in DK OrderStatus
-                Some(comment),
-                user.user_id,
-            ).await?)
-        };
-
-        let (stock_after, low_stock) = crate::handlers::stock::apply_stock_change_in_tx(
-            &mut tx,
-            line.part_id,
-            line.quantity,
-            line.price,
-            Some(comment),
-            false, // not a correction — real receipt
-            user.user_id,
-            crate::handlers::stock::OrderAttribution {
-                distributor_id: Some(dk_id),
-                sales_order_number: Some(&so_str),
-            },
-            psl_id, // FK ties the StockEntry to the PSL row minted above
-        ).await?;
-        results.push(OrderReceiveResult {
-            part_id: line.part_id,
-            quantity: line.quantity,
-            stock_after,
-            low_stock,
-        });
-    }
+    let dk_id = crate::handlers::lookup::find_or_create_distributor(
+        &mut tx, "Digi-Key", "https://www.digikey.com",
+    ).await?;
+    let results = crate::handlers::lookup::apply_order_receive_lines(
+        &mut tx, dk_id, "Digi-Key", req.order_id, &req.lines, user.user_id,
+    ).await?;
     tx.commit().await?;
     tracing::info!(
         order_id = req.order_id, applied = results.len(),
