@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 7: file-storage abstraction shared by all attachment endpoints.
 //!
 //! Layout on disk — matches the legacy PartKeepr layout so existing

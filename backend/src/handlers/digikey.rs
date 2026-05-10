@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 12b — Digi-Key Product Information V4 integration.
 //!
 //! OAuth2 client_credentials grant (two-legged), shared token cache

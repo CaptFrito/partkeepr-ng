@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 12a.1 — Mouser Search API integration.
 //!
 //! Three things:

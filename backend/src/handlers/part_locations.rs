@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Multi-location parts (`PartStorageLocation`).
 //!
 //! Per-row CRUD for the descriptive breakdown of where a part's stock

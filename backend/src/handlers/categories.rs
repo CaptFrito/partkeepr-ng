@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 5c-1: PartCategory CRUD.
 //!
 //! - `POST   /api/part_categories`            — create child category

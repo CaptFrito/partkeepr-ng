@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // HAND-ROLLED — not from codegen. The `PartStorageLocation` table is
 // new in partkeepr-ng (no upstream Doctrine entity); see
 // `scripts/migrations/multi-location-parts.sql` for the schema.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 13 — label printing.
 //!
 //! Two endpoints:

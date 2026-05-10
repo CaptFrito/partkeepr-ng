@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! W8c.X: GridPreset CRUD.
 //!
 //! GridPreset stores named, *shared* (no per-user) layouts for any

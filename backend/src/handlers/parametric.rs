@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 11a: parametric search — find parts by parameter predicates.
 //!
 //! Three endpoints:

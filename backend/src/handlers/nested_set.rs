@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Shared nested-set tree helpers, used by every entity that has a
 //! Doctrine NestedSet behaviour: PartCategory, StorageLocationCategory,
 //! FootprintCategory.

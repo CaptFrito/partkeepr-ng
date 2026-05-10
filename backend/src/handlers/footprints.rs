@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 5c-3: FootprintCategory + Footprint CRUD.
 //!
 //! Same shape as handlers/storage_locations.rs — a nested-set tree of

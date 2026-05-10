@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Minimal ClamAV/clamd INSTREAM client.
 //!
 //! Talks the `INSTREAM` wire protocol over TCP — the simplest of clamd's

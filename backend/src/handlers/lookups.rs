@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 5c-4: flat-lookup CRUD for Manufacturer, Distributor, PartUnit
 //! (a.k.a. PartMeasurementUnit), Unit, SiPrefix, plus the `UnitSiPrefixes`
 //! many-to-many join.

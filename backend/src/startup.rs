@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Startup invariant checks. Runs once after the DB pool is built,
 //! before the server starts accepting requests. The single rule:
 //! everything in here must be idempotent — repeated runs on a

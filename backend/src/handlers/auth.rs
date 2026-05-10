@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 10a: authentication.
 //!
 //! Login verifies against the legacy `FOSUser` table's password hash

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 7: per-entity attachment endpoints.
 //!
 //! Five Doctrine entities — PartAttachment, FootprintImage,

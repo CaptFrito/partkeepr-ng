@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 5c-2: StorageLocationCategory + StorageLocation CRUD.
 //!
 //! Mirrors handlers/categories.rs for the category half (nested-set tree

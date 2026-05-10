@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 4a: hand-written endpoints powering the PartManager screen.
 //!
 //! - `GET /api/part_categories/tree`  — category nested-set as a JSON tree

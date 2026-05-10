@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 12a — Distributor / catalog lookups (Mouser today, Digi-Key
 //! and Nexar later). This module defines the unified result shape
 //! every source maps into, plus the `/api/lookup/capabilities`

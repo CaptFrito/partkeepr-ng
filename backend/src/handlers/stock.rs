@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stock add/remove. One endpoint, one big transaction.
 //!
 //! `POST /api/parts/{id}/stock-entries` inserts a new StockEntry row,
@@ -406,15 +408,24 @@ pub async fn list_part_receipts(
 
 /// Walk chronological stock entries to derive current stock + avg price.
 ///
+/// **Ported from upstream PartKeepr (GPLv3):**
+///   `src/PartKeepr/PartBundle/Entity/Part.php::recomputeStockLevels()`
+///   (line 949 in upstream commit `f8d9bbd` / 1.4.0 release tarball).
+/// The math is reproduced faithfully so a partkeepr-ng install can read
+/// or write the same StockEntry table as the upstream PHP without the
+/// numbers diverging.
+///
 /// **Correction entries** (recount/reconciliation adjustments) preserve
 /// the running avg_price: they change the quantity on hand without
 /// implying a value transaction. The rolling total cost gets re-spread
 /// across the new quantity at the same per-piece cost basis.
-/// This intentionally diverges from upstream PartKeepr's PHP, which
-/// folds correction deltas into the cost-basis math and produces
-/// counterintuitive avg-price drops on simple recounts.
+/// This intentionally **diverges** from upstream's PHP, which folds
+/// correction deltas into the cost-basis math and produces
+/// counterintuitive avg-price drops on simple recounts. We treat
+/// corrections as pure quantity moves; this is the only known
+/// behavioral departure from upstream's recompute.
 ///
-/// **Non-correction entries** follow PartKeepr's logic: positive entries
+/// **Non-correction entries** follow upstream's logic: positive entries
 /// (adds) accumulate `price × qty` into the rolling total; negative
 /// entries (removes) either snap to the last positive entry's price (if
 /// stock dropped below the last add's quantity) or scale the rolling

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
 // partkeepr-ng — Webix frontend.
 //
 // Same-origin with the API: backend serves these files via tower-http

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Slice 8a: Project + ProjectPart (BOM) CRUD.
 //!
 //! - `GET    /api/projects`               — flat list with parts/runs counts

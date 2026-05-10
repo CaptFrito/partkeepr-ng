@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `cargo run --bin reset-password -- <username> <new-password>`
 //!
 //! Resets a single FOSUser row's password hash to a new value, using
