@@ -19,10 +19,10 @@ pub enum AppError {
     /// hard-block on outstanding references and need to report counts so
     /// the UI can render an actionable message.
     Conflict(serde_json::Value),
-    /// 401. Slice 10: returned by the auth login handler on bad
-    /// credentials; the auth middleware uses a direct response, not
-    /// this variant, but it's available for any future handler that
-    /// needs to refuse based on the session.
+    /// 401. Returned by the auth login handler on bad credentials;
+    /// the auth middleware uses a direct response, not this variant,
+    /// but it's available for any future handler that needs to
+    /// refuse based on the session.
     Unauthorized(&'static str),
     /// 500 with a dynamic message. Used for handler-internal failures
     /// (temp files, subprocess spawn, etc.) where there's no friendlier

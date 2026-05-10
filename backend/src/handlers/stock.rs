@@ -43,14 +43,14 @@ pub struct StockChange {
     pub distributor_id: Option<i32>,
     #[serde(default)]
     pub sales_order_number: Option<String>,
-    /// Slice 13b follow-on: track *which physical container* this
-    /// stock came in. Set `create_storage_row=true` to insert a
-    /// `PartStorageLocation` row in the same transaction as the
-    /// StockEntry. `form` is the ENUM (Reel/CutTape/Loose/Tray/...
-    /// see PartStorageLocation schema), `storage_location_id` is
-    /// where the container lives, and lot/date come straight off the
-    /// scanned 2D barcode if available. Per-receipt = per row, so
-    /// three scans of three reels land as three distinct rows.
+    /// Track *which physical container* this stock came in. Set
+    /// `create_storage_row=true` to insert a `PartStorageLocation`
+    /// row in the same transaction as the StockEntry. `form` is the
+    /// ENUM (Reel/CutTape/Loose/Tray/...  see PartStorageLocation
+    /// schema), `storage_location_id` is where the container lives,
+    /// and lot/date come straight off the scanned 2D barcode if
+    /// available. Per-receipt = per row, so three scans of three
+    /// reels land as three distinct rows.
     #[serde(default)]
     pub create_storage_row: bool,
     #[serde(default)]
@@ -61,12 +61,12 @@ pub struct StockChange {
     pub lot_number: Option<String>,
     #[serde(default)]
     pub date_code: Option<String>,
-    /// Slice 13c: tie this StockEntry to a specific PartStorageLocation
-    /// row. Adds (positive delta) targeting an existing row → that
-    /// row's quantity increments. Removes (negative delta) → that
-    /// row's quantity decrements. Mutually exclusive with
-    /// `create_storage_row`: that flag mints a fresh row, this points
-    /// at an existing one. Both NULL = pre-13c untracked entry (the
+    /// Tie this StockEntry to a specific PartStorageLocation row.
+    /// Adds (positive delta) targeting an existing row → that row's
+    /// quantity increments. Removes (negative delta) → that row's
+    /// quantity decrements. Mutually exclusive with
+    /// `create_storage_row`: that flag mints a fresh row, this
+    /// points at an existing one. Both NULL = untracked entry (the
     /// auto-Loose-row fallback still kicks in for first-add cases).
     #[serde(default)]
     pub part_storage_location_id: Option<i32>,

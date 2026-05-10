@@ -75,8 +75,6 @@ struct MouserSearchResponse {
 #[serde(rename_all = "PascalCase")]
 struct MouserSearchResults {
     #[serde(default)]
-    number_of_result: i32,
-    #[serde(default)]
     parts: Vec<MouserPart>,
 }
 

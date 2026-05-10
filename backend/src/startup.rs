@@ -6,8 +6,8 @@
 //! healthy DB are a no-op.
 //!
 //! Today this only ensures the operator's "(NOWHERE)" catch-all
-//! StorageLocation exists (slice 13b follow-on). New invariants
-//! (schema checks, missing seed rows, etc.) belong here too.
+//! StorageLocation exists. New invariants (schema checks, missing
+//! seed rows, etc.) belong here too.
 
 use anyhow::Context;
 use sqlx::MySqlPool;

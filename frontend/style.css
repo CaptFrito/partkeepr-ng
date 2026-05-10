@@ -241,7 +241,7 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* Slice 13c: per-row Consume button in the Packaging detail panel.
+/* Per-row Consume button in the Packaging detail panel.
    Styled inline (not via the .pk-btn-remove wrapper class) since it
    sits inside a plain HTML <table>, not a Webix toolbar. */
 button.pk-consume-btn {
@@ -468,7 +468,7 @@ button.pk-consume-btn:hover { background: #8c2424; }
 }
 
 /* =================================================================
-   Slice 13 — label preview area
+   Label preview area (Brother PT-D410 via ptouch-print)
    ================================================================= */
 
 .pk-label-preview {

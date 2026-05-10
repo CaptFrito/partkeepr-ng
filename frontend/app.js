@@ -754,7 +754,7 @@
         ensureFilterDistributorsLoaded();
         // Restore per-user parts-grid layout (W8c).
         setTimeout(restorePartsGridState, 0);
-        // Slice 12a.1: figure out which lookup sources are
+        // Figure out which lookup sources are
         // available; reveal the "🔎 Add via Mouser" button on hit.
         refreshLookupCapabilities();
 
@@ -849,7 +849,7 @@
         { id: "Other",   value: "Other" },
     ];
 
-    /// Slice 13c: when consuming stock from a part with multiple
+    /// When consuming stock from a part with multiple
     /// PartStorageLocation rows, default-pick by form priority — draw
     /// from already-broken-into stock first so unbroken reels stay
     /// intact for the next quantity-discount order. Lower index =
@@ -6155,7 +6155,7 @@
                         jumpToProject(pid);
                     });
                 });
-                // Slice 13c: per-row consume buttons in the Packaging section.
+                // Per-row Consume buttons in the Packaging section.
                 root.querySelectorAll('button.pk-consume-btn[data-psl-id]').forEach((btn) => {
                     btn.addEventListener("click", (ev) => {
                         ev.preventDefault();
@@ -6933,7 +6933,7 @@
                 `<table class="pk-detail-table"><thead><tr><th>Date</th><th>Δ</th><th>Price</th><th>By</th></tr></thead><tbody>${rows}</tbody></table>`));
         }
 
-        // Distributor-attributed receipts (slice 12b.2 follow-on).
+        // Distributor-attributed receipts.
         // One row per (distributor, sales order #); useful for stock
         // age and "which order is this batch from" tracking.
         if (receipts && receipts.length) {
@@ -7483,7 +7483,7 @@
         }
     }
 
-    /// Slice 13c: consume N units from a specific PartStorageLocation
+    /// Consume N units from a specific PartStorageLocation
     /// row. Posts a negative-delta StockEntry with `part_storage_location_id`
     /// set, which the backend uses to (a) decrement that PSL row's
     /// quantity in the same transaction and (b) record traceability on
@@ -8640,7 +8640,7 @@
     }
 
     // ============================================================
-    //  Slice 13 — label printing (Brother PT-D410 via ptouch-print)
+    //  Label printing (Brother PT-D410 via ptouch-print)
     //
     //  Renderer (Canvas + bwip-js) is universal: any browser, any
     //  OS, no backend needed for the "Download PNG" path. The
@@ -9048,7 +9048,7 @@
     }
 
     // ============================================================
-    //  Slice 12a.1 — Mouser search dialog
+    //  Distributor lookup dialog (Mouser + Digi-Key search/import)
     //
     //  Capabilities are fetched on shell mount; the toolbar button
     //  is unhidden when caps.mouser.available is true. The dialog
@@ -9453,7 +9453,7 @@
     }
 
     // ============================================================
-    //  Slice 12b.2 — Receive Digi-Key Order
+    //  Receive Order dialog (DK + Mouser, partial-shipment aware)
     //
     //  Operator types a Digi-Key Sales Order #, hits Fetch. We call
     //  /order-status which fetches the order via Digi-Key OrderStatus
@@ -9478,7 +9478,7 @@
         const winId = "pk-dk-receive-dialog";
         if ($$(winId)) { $$(winId).destructor(); }
 
-        // Slice 13d: lookups (storage locations) needed for the per-line
+        // Lookups (storage locations) needed for the per-line
         // Storage picker. Must be loaded *before* the grid renders or
         // the richselect popups won't have data.
         try { await ensureLookups(); }
@@ -9494,7 +9494,7 @@
         const skuHeaderFor = (s) => s === "mouser" ? "Mouser P/N" : "DK P/N";
 
         let preview = null;  // OrderStatusResponse from the last fetch
-        // Slice 13d: per-line state extends to packaging + skip flag.
+        // Per-line state — packaging + skip flag.
         //   apply:                 include this line in the apply batch
         //   quantity:              units to apply (residual on partial lines)
         //   form:                  PSL form to mint with (default Loose)
@@ -9629,7 +9629,7 @@
                             },
                             { id: "quantity_shipped", header: "Qty shipped", width: 90, css: "right" },
                             {
-                                // Slice 13d: how many units already received against this SO#.
+                                // How many units already received against this SO#.
                                 // Pulls from StockEntry rows attributed to (distributor, SO#).
                                 // Green = full, orange = partial, neutral = zero.
                                 id: "_received",
@@ -9652,7 +9652,7 @@
                                 editor: "text",
                                 css: "right",
                             },
-                            // Slice 13d: per-line packaging defaults.
+                            // Per-line packaging defaults.
                             {
                                 id: "_form",
                                 header: "Form",
@@ -9816,7 +9816,7 @@
             }
             const win = $$(winId);
             if (win) win.config.head = headTpl(preview.sales_order_id);
-            // Per-line state init. Slice 13d rules:
+            // Per-line state init. Rules:
             //   target           = quantity_shipped or quantity_ordered (fallback)
             //   already_received = StockEntry sum for this (distributor, SO#)
             //   residual         = max(target - already_received, 0)
@@ -9905,7 +9905,7 @@
                     quantity: st.quantity,
                     price: li.unit_price ? li.unit_price.toFixed(4) : null,
                     comment: null,
-                    // Slice 13d: per-line packaging metadata.
+                    // Per-line packaging metadata.
                     form: st.form || "Loose",
                     storage_location_id: st.storage_location_id || null,
                     skip_psl_row: !!st.skip_psl_row,
