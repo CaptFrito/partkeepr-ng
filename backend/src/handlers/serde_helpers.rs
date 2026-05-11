@@ -60,3 +60,14 @@ where
 {
     Ok(de_int_or_string(de)?.unwrap_or(0))
 }
+
+/// Coerce JSON `null` → `0.0`. TrustedParts.com's PriceBreak.Quantity
+/// and PriceBreak.Amount come back as null on some distributors' rows
+/// (typically "call for price" or "unannounced" lines). Treating them
+/// as zero keeps the row in the response so the operator sees it.
+pub fn null_to_zero_f64<'de, D>(de: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<f64>::deserialize(de)?.unwrap_or(0.0))
+}

@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::error::AppError;
-use crate::handlers::serde_helpers::null_to_empty_string;
+use crate::handlers::serde_helpers::{null_to_empty_string, null_to_zero_f64};
 
 const TRUSTEDPARTS_BASE: &str = "https://api.trustedparts.com";
 const HTTP_TIMEOUT_SECS: u64 = 20;
@@ -239,9 +239,9 @@ struct TpPricing {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct TpPrice {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_zero_f64")]
     quantity: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_zero_f64")]
     amount: f64,
     #[serde(default, deserialize_with = "null_to_empty_string")]
     formatted_amount: String,
