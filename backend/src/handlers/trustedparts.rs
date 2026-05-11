@@ -409,9 +409,9 @@ pub async fn compare(
         // from https://cms.trustedparts.com/production/images/trustedparts-logo-large.png
         attribution_html:
             "<a href=\"https://www.trustedparts.com/\" target=\"_blank\" rel=\"noopener\" \
-                style=\"display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:inherit\">\
+                style=\"display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:inherit\">\
                <span>Powered by</span>\
-               <img src=\"assets/trustedparts-logo.png\" alt=\"TrustedParts.com\" style=\"height:14px;vertical-align:middle\"/>\
+               <img src=\"assets/trustedparts-logo.png\" alt=\"TrustedParts.com\" style=\"height:20px;vertical-align:middle\"/>\
              </a>".to_string(),
     }))
 }

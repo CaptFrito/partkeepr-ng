@@ -1722,9 +1722,9 @@ async function openCompareDistributorsDialog(part) {
                     view: "template",
                     id: "pk-compare-footer",
                     borderless: true,
-                    height: 30,
+                    height: 36,
                     css: "pk-help-hint",
-                    template: '<div style="padding:6px 12px;font-size:11px;color:#6a7a8a"></div>',
+                    template: '<div style="padding:8px 12px;font-size:12px;color:#6a7a8a"></div>',
                 },
                 {
                     cols: [
@@ -1786,6 +1786,6 @@ async function openCompareDistributorsDialog(part) {
             `across ${resp.distributor_count} distributor${resp.distributor_count === 1 ? "" : "s"}` +
             (kind === "cached" ? " · cached" : "") + tariffNote);
         status.refresh();
-        footer.setHTML(`<div style="padding:6px 12px;font-size:11px;color:#6a7a8a">${resp.attribution_html || ""}</div>`);
+        footer.setHTML(`<div style="padding:8px 12px;font-size:12px;color:#6a7a8a">${resp.attribution_html || ""}</div>`);
     }
 }
