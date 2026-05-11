@@ -392,6 +392,14 @@ button.pk-consume-btn:hover { background: #8c2424; }
     padding: 4px 6px !important;
 }
 
+/* Tighten the internal left/right padding on detail-toolbar buttons so
+   they consume only as much horizontal real-estate as the label needs.
+   Webix's default ~16px each side is too generous for our compact row. */
+.pk-detail-actions .webix_button {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+}
+
 /* Green = additive action (per the partkeepr-ng button color convention).
    The selectors target Webix's button structure so :hover and :active still
    work — we only override colors. */
