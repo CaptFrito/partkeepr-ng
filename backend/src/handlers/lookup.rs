@@ -20,6 +20,7 @@ use crate::handlers::attachments::{fetch_url_core, AttachmentKind, FetchByUrl};
 use crate::handlers::digikey::DigiKeyConfig;
 use crate::handlers::mouser::MouserConfig;
 use crate::handlers::storage::StorageConfig;
+use crate::handlers::trustedparts::TrustedPartsConfig;
 
 /// Unified search-result shape across all lookup sources. Designed
 /// to fit Mouser today, Digi-Key + Nexar without changes later.
@@ -75,6 +76,10 @@ pub struct CapabilitiesResponse {
     /// One entry per source. `null` when unconfigured.
     pub mouser: Option<SourceCaps>,
     pub digikey: Option<SourceCaps>,
+    /// TrustedParts.com live compare — different shape than the
+    /// import/order-receive sources, so it lives here as its own
+    /// optional entry rather than reusing `SourceCaps`.
+    pub trustedparts: Option<TrustedPartsCaps>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,9 +93,15 @@ pub struct SourceCaps {
     pub calls_per_day: u32,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TrustedPartsCaps {
+    pub available: bool,
+}
+
 pub async fn capabilities(
     State(mouser): State<MouserConfig>,
     State(digikey): State<DigiKeyConfig>,
+    State(trustedparts): State<TrustedPartsConfig>,
 ) -> Json<CapabilitiesResponse> {
     Json(CapabilitiesResponse {
         mouser: Some(SourceCaps {
@@ -106,6 +117,9 @@ pub async fn capabilities(
             order_status_available: digikey.available(),
             calls_per_minute: 60, // Digi-Key historical: ~1/sec.
             calls_per_day: 1000,
+        }),
+        trustedparts: Some(TrustedPartsCaps {
+            available: trustedparts.available(),
         }),
     })
 }

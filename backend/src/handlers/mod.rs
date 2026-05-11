@@ -27,6 +27,7 @@ pub mod serde_helpers;
 pub mod stock;
 pub mod storage;
 pub mod storage_locations;
+pub mod trustedparts;
 
 /// Hand-written endpoints. Merged into the main router alongside the
 /// codegen routes from `models::routes()`. Routes here take precedence by
@@ -273,4 +274,7 @@ pub fn routes() -> Router<AppState> {
         // packing slips and per-reel labels). Frontend handleScan
         // dispatches here when it detects a 2D-shaped payload.
         .route("/api/lookup/digikey/barcode", post(digikey::process_barcode))
+        // TrustedParts.com — live cross-distributor compare modal.
+        // Results are NOT persisted (TOS forbids storage >7d).
+        .route("/api/lookup/trustedparts/compare", post(trustedparts::compare))
 }

@@ -932,6 +932,15 @@ function buildRightPane() {
                             },
                             {
                                 view: "button",
+                                id: "pk-detail-compare-btn",
+                                value: "💲 Compare distributors",
+                                width: 200,
+                                tooltip: "Live cross-distributor stock + price lookup via TrustedParts.com",
+                                hidden: true,  // shown when capabilities reports trustedparts: { available: true }
+                                click: () => openCompareDistributorsDialog(currentPart),
+                            },
+                            {
+                                view: "button",
                                 value: "🗑 Delete",
                                 css: "pk-btn-remove",
                                 width: 110,

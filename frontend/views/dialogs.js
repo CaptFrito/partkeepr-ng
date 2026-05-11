@@ -735,6 +735,13 @@ async function refreshLookupCapabilities() {
     if (recvBtn && recvSources.length >= 1) {
         recvBtn.show();
     }
+    // 💲 Compare distributors button — TrustedParts.com live aggregator.
+    // Lives on the part-detail action toolbar; revealed here.
+    const cmpBtn = $$("pk-detail-compare-btn");
+    if (cmpBtn && lookupCapsCache && lookupCapsCache.trustedparts
+        && lookupCapsCache.trustedparts.available) {
+        cmpBtn.show();
+    }
 }
 
 /// Sources that have `order_status_available: true`. Independent of
@@ -1579,3 +1586,206 @@ async function openOrderReceiveDialog(source) {
     }
 }
 
+
+// ============================================================
+//  Compare distributors (TrustedParts.com)
+// ============================================================
+
+// Per-(MPN, mfg) in-memory cache with a 1-hour TTL. Stays well inside
+// the TrustedParts.com 7-day storage cap, but lets a repeat-open of
+// the same part within a session render instantly instead of round-
+// tripping. Cache lives only as long as the page does — no persistence.
+const _tpCompareCache = new Map();
+const _TP_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function _tpCacheKey(mpn, manufacturer) {
+    return `${(mpn || "").trim().toLowerCase()}|${(manufacturer || "").trim().toLowerCase()}`;
+}
+
+/// Open the "💲 Compare distributors" modal for a given part. Hits the
+/// TrustedParts.com live aggregator via the backend and renders a grid
+/// of authorized-distributor offers (stock / MOQ / pricing / links).
+/// Results are not persisted to the local DB — TrustedParts.com TOS
+/// forbids storing API data beyond 7 days. The grid disappears when
+/// the modal closes.
+async function openCompareDistributorsDialog(part) {
+    if (!part || !part.id) {
+        webix.message({ type: "error", text: "No part selected." });
+        return;
+    }
+    const mpn = part.manufacturers && part.manufacturers[0] && part.manufacturers[0].part_number
+        ? part.manufacturers[0].part_number.trim()
+        : (part.name || "").trim();
+    const manufacturer = part.manufacturers && part.manufacturers[0]
+        ? (part.manufacturers[0].manufacturer_name || "").trim()
+        : "";
+    if (!mpn) {
+        webix.message({ type: "error",
+            text: "Part has no manufacturer part number — add one on the Manufacturers tab first." });
+        return;
+    }
+
+    const winId = "pk-compare-dialog";
+    if ($$(winId)) { $$(winId).destructor(); }
+
+    webix.ui({
+        view: "window",
+        id: winId,
+        modal: true,
+        position: "center",
+        width: 1180,
+        height: 600,
+        head: `Compare distributors — ${mpn}${manufacturer ? " · " + manufacturer : ""}`,
+        body: {
+            rows: [
+                {
+                    view: "toolbar",
+                    css: "pk-pane-toolbar",
+                    height: 40,
+                    cols: [
+                        { view: "label", id: "pk-compare-status",
+                          label: "Querying TrustedParts.com…", css: "pk-pane-title" },
+                        {},
+                        { view: "button", value: "↻ Refresh", width: 110,
+                          tooltip: "Bypass the in-memory cache and re-query upstream",
+                          click: () => runCompare(true) },
+                    ],
+                },
+                {
+                    view: "datatable",
+                    id: "pk-compare-grid",
+                    css: "pk-grid",
+                    select: false,
+                    columns: [
+                        { id: "distributor_name", header: "Distributor", width: 200 },
+                        { id: "sku", header: "SKU", width: 160,
+                          template: function (o) {
+                              if (!o.product_url) return escapeHtml(o.sku || "");
+                              return `<a href="${escapeHtml(o.product_url)}" target="_blank" rel="noopener">${escapeHtml(o.sku || "")}</a>`;
+                          },
+                        },
+                        { id: "stock_qty", header: { text: "Stock", css: "pk-th-numeric" },
+                          width: 100, css: "pk-numeric",
+                          template: function (o) {
+                              if (o.stock_qty != null && o.stock_qty > 0) {
+                                  return `<span class="pk-stock-add">${Math.round(o.stock_qty).toLocaleString()}</span>`;
+                              }
+                              if (o.stock_availability) return `<span class="pk-help-hint">${escapeHtml(o.stock_availability)}</span>`;
+                              return `<span class="pk-stock-remove">—</span>`;
+                          },
+                        },
+                        { id: "min_qty", header: { text: "MOQ", css: "pk-th-numeric" },
+                          width: 80, css: "pk-numeric",
+                          template: (o) => o.min_qty != null ? o.min_qty : "" },
+                        { id: "_price1", header: { text: "Unit @1", css: "pk-th-numeric" },
+                          width: 110, css: "pk-numeric",
+                          template: function (o) {
+                              const p = (o.price_breaks || [])[0];
+                              if (!p) return "";
+                              return escapeHtml(p.formatted || `${p.amount.toFixed(4)} ${o.currency || ""}`);
+                          },
+                        },
+                        { id: "_price100", header: { text: "Unit @100+", css: "pk-th-numeric" },
+                          width: 120, css: "pk-numeric",
+                          template: function (o) {
+                              const breaks = o.price_breaks || [];
+                              // Find the break at qty >= 100 (or the largest qty available).
+                              const target = breaks.find((b) => b.quantity >= 100)
+                                  || breaks[breaks.length - 1];
+                              if (!target) return "";
+                              return escapeHtml(target.formatted || `${target.amount.toFixed(4)} ${o.currency || ""}`);
+                          },
+                        },
+                        { id: "_links", header: "Links", width: 130,
+                          template: function (o) {
+                              const bits = [];
+                              if (o.datasheet_url) {
+                                  bits.push(`<a href="${escapeHtml(o.datasheet_url)}" target="_blank" rel="noopener">📄 datasheet</a>`);
+                              }
+                              if (o.product_url) {
+                                  bits.push(`<a href="${escapeHtml(o.product_url)}" target="_blank" rel="noopener">🛒 open</a>`);
+                              }
+                              return bits.join(" · ");
+                          },
+                        },
+                        { id: "_packaging", header: "Packaging", fillspace: true,
+                          template: function (o) {
+                              return (o.packaging || []).map(p =>
+                                  `${escapeHtml(p.package_type || "")}${p.min_order_qty ? " (MOQ " + p.min_order_qty + ")" : ""}`
+                              ).join(" · ");
+                          },
+                        },
+                    ],
+                    data: [],
+                },
+                {
+                    view: "template",
+                    id: "pk-compare-footer",
+                    borderless: true,
+                    height: 28,
+                    css: "pk-help-hint",
+                    template: '<div style="padding:6px 12px;font-size:11px;color:#6a7a8a"></div>',
+                },
+                {
+                    cols: [
+                        {},
+                        { view: "button", value: "Close", width: 100,
+                          click: () => $$(winId) && $$(winId).destructor() },
+                    ],
+                },
+            ],
+        },
+    }).show();
+
+    runCompare(false);
+
+    async function runCompare(bypassCache) {
+        const status = $$("pk-compare-status");
+        const grid = $$("pk-compare-grid");
+        const footer = $$("pk-compare-footer");
+        if (!status || !grid || !footer) return;
+        status.define("label", "Querying TrustedParts.com…");
+        status.refresh();
+
+        const cacheKey = _tpCacheKey(mpn, manufacturer);
+        const now = Date.now();
+        if (!bypassCache) {
+            const hit = _tpCompareCache.get(cacheKey);
+            if (hit && (now - hit.ts) < _TP_CACHE_TTL_MS) {
+                renderResults(hit.resp, "cached");
+                return;
+            }
+        }
+
+        try {
+            const resp = await api.lookupTrustedPartsCompare(mpn, manufacturer || null);
+            _tpCompareCache.set(cacheKey, { ts: now, resp });
+            renderResults(resp, "live");
+        } catch (e) {
+            console.error(e);
+            grid.clearAll();
+            status.define("label", "Query failed");
+            status.refresh();
+            footer.setHTML(`<div style="padding:6px 12px;font-size:11px;color:#aa2a2a">${escapeHtml(e.message || String(e))}</div>`);
+        }
+    }
+
+    function renderResults(resp, kind) {
+        const status = $$("pk-compare-status");
+        const grid = $$("pk-compare-grid");
+        const footer = $$("pk-compare-footer");
+        if (!status || !grid || !footer) return;
+        // Tag rows with synthetic ids so the datatable doesn't reject duplicates.
+        const rows = (resp.offers || []).map((o, i) => Object.assign({ id: i + 1 }, o));
+        grid.clearAll();
+        grid.parse(rows);
+        const tariffNote = resp.is_affected_by_tariff
+            ? ` <span style="color:#aa6b2a">⚠ tariff-affected</span>` : "";
+        status.define("label",
+            `${rows.length} offer${rows.length === 1 ? "" : "s"} ` +
+            `across ${resp.distributor_count} distributor${resp.distributor_count === 1 ? "" : "s"}` +
+            (kind === "cached" ? " · cached" : "") + tariffNote);
+        status.refresh();
+        footer.setHTML(`<div style="padding:6px 12px;font-size:11px;color:#6a7a8a">${resp.attribution_html || ""}</div>`);
+    }
+}

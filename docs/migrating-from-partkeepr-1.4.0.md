@@ -147,6 +147,7 @@ PARTKEEPR_MOUSER_ORDER_KEY=...
 PARTKEEPR_DIGIKEY_CLIENT_ID=...                # Digi-Key API
 PARTKEEPR_DIGIKEY_CLIENT_SECRET=...
 PARTKEEPR_DIGIKEY_CUSTOMER_ID=...              # required for OrderStatus only
+PARTKEEPR_TRUSTEDPARTS_API_KEY=...             # TrustedParts.com live compare
 ```
 
 Start the API:
