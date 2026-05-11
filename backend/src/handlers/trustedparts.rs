@@ -402,9 +402,16 @@ pub async fn compare(
         distributor_count,
         response_time: resp.response_time,
         current_date: resp.current_date,
-        // Attribution required by TrustedParts.com TOS.
+        // Required attribution per TrustedParts.com docs page
+        // /en/docs/trustedparts-logos — text "Powered by" + the
+        // TrustedParts.com logo, linking back to the site. The logo
+        // asset lives at frontend/assets/trustedparts-logo.png, sourced
+        // from https://cms.trustedparts.com/production/images/trustedparts-logo-large.png
         attribution_html:
-            "Data from <a href=\"https://www.trustedparts.com/\" target=\"_blank\" rel=\"noopener\">TrustedParts.com</a> — \
-             authorized-distributor inventory aggregator.".to_string(),
+            "<a href=\"https://www.trustedparts.com/\" target=\"_blank\" rel=\"noopener\" \
+                style=\"display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:inherit\">\
+               <span>Powered by</span>\
+               <img src=\"assets/trustedparts-logo.png\" alt=\"TrustedParts.com\" style=\"height:14px;vertical-align:middle\"/>\
+             </a>".to_string(),
     }))
 }

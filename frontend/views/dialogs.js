@@ -1722,7 +1722,7 @@ async function openCompareDistributorsDialog(part) {
                     view: "template",
                     id: "pk-compare-footer",
                     borderless: true,
-                    height: 28,
+                    height: 30,
                     css: "pk-help-hint",
                     template: '<div style="padding:6px 12px;font-size:11px;color:#6a7a8a"></div>',
                 },
