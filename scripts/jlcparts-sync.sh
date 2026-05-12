@@ -25,12 +25,14 @@
 set -euo pipefail
 
 OUT_DIR="${PARTKEEPR_JLCPARTS_DIR:-/var/lib/partkeepr-ng}"
+ARCHIVE_DIR_OVERRIDE="${PARTKEEPR_JLCPARTS_ARCHIVE_DIR:-}"
 KEEP_ARCHIVES=4
 DRY_RUN=0
 
-while getopts "o:a:nh" opt; do
+while getopts "o:A:a:nh" opt; do
     case $opt in
         o) OUT_DIR="$OPTARG" ;;
+        A) ARCHIVE_DIR_OVERRIDE="$OPTARG" ;;
         a) KEEP_ARCHIVES="$OPTARG" ;;
         n) DRY_RUN=1 ;;
         h)
@@ -43,7 +45,11 @@ done
 
 UPSTREAM="https://yaqwsx.github.io/jlcparts/data"
 DEST="$OUT_DIR/jlcparts.sqlite3"
-ARCHIVE_DIR="$OUT_DIR/jlc-archive"
+# Archive dir defaults to a subdir of OUT_DIR (keeps everything together)
+# but can be overridden so archives can live on slower / cheaper storage
+# (e.g. a ZFS dataset on a file server) while the live DB stays on
+# fast local disk. Set via -A or PARTKEEPR_JLCPARTS_ARCHIVE_DIR.
+ARCHIVE_DIR="${ARCHIVE_DIR_OVERRIDE:-$OUT_DIR/jlc-archive}"
 STAGE_DIR="$OUT_DIR/jlc-staging.$$"
 
 log() { printf '[jlcparts-sync] %s\n' "$*"; }

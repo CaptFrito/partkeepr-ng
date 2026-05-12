@@ -17,9 +17,11 @@
 set -euo pipefail
 
 OWNER="${USER}"
-while getopts "u:h" opt; do
+ARCHIVE_DIR=""        # default = $DATA_DIR/jlc-archive (alongside the DB)
+while getopts "u:A:h" opt; do
     case $opt in
         u) OWNER="$OPTARG" ;;
+        A) ARCHIVE_DIR="$OPTARG" ;;
         h)
             sed -n '4,/^$/p' "$0" | sed 's/^# \?//'
             exit 0
@@ -41,7 +43,14 @@ step() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 # ---- 1. Create the system data + log dirs -----------------------------------
 
 step "creating $DATA_DIR + $LOG_DIR (sudo)"
-sudo mkdir -p "$DATA_DIR/jlc-archive" "$LOG_DIR"
+# Only create $DATA_DIR/jlc-archive if archives aren't being relocated
+# elsewhere (e.g. to an NFS-mounted ZFS dataset).
+if [[ -z "$ARCHIVE_DIR" ]]; then
+    sudo mkdir -p "$DATA_DIR/jlc-archive" "$LOG_DIR"
+else
+    sudo mkdir -p "$DATA_DIR" "$LOG_DIR"
+    step "archives configured for $ARCHIVE_DIR (assumed pre-created with right ownership)"
+fi
 sudo chown -R "$OWNER":"$(id -gn "$OWNER")" "$DATA_DIR" "$LOG_DIR"
 
 # ---- 2. Migrate the dev SQLite if present ----------------------------------
@@ -95,6 +104,7 @@ sudo tee "$SITE_CONF" >/dev/null <<EOF
 # Overrides defaults baked into /etc/cron.weekly/partkeepr-ng-jlcparts-sync.
 SYNC_SCRIPT="$SYNC_SCRIPT_SRC"
 DATA_DIR="$DATA_DIR"
+ARCHIVE_DIR="$ARCHIVE_DIR"
 LOG_FILE="$LOG_DIR/jlcparts-sync.log"
 PARTKEEPR_USER="$OWNER"
 KEEP_ARCHIVES=4
