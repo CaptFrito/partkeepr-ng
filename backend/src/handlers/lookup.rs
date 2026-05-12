@@ -18,6 +18,7 @@ use sqlx::MySqlPool;
 use crate::error::AppError;
 use crate::handlers::attachments::{fetch_url_core, AttachmentKind, FetchByUrl};
 use crate::handlers::digikey::DigiKeyConfig;
+use crate::handlers::jlcparts::JlcPartsConfig;
 use crate::handlers::mouser::MouserConfig;
 use crate::handlers::storage::StorageConfig;
 use crate::handlers::trustedparts::TrustedPartsConfig;
@@ -80,6 +81,10 @@ pub struct CapabilitiesResponse {
     /// import/order-receive sources, so it lives here as its own
     /// optional entry rather than reusing `SourceCaps`.
     pub trustedparts: Option<TrustedPartsCaps>,
+    /// jlcparts LCSC / JLCPCB cross-reference — local SQLite mirror,
+    /// no live API call. `available` flips on when
+    /// `PARTKEEPR_JLCPARTS_DB_PATH` points at a readable file.
+    pub jlcparts: Option<TrustedPartsCaps>,
 }
 
 #[derive(Debug, Serialize)]
@@ -102,6 +107,7 @@ pub async fn capabilities(
     State(mouser): State<MouserConfig>,
     State(digikey): State<DigiKeyConfig>,
     State(trustedparts): State<TrustedPartsConfig>,
+    State(jlcparts): State<JlcPartsConfig>,
 ) -> Json<CapabilitiesResponse> {
     Json(CapabilitiesResponse {
         mouser: Some(SourceCaps {
@@ -120,6 +126,9 @@ pub async fn capabilities(
         }),
         trustedparts: Some(TrustedPartsCaps {
             available: trustedparts.available(),
+        }),
+        jlcparts: Some(TrustedPartsCaps {
+            available: jlcparts.available(),
         }),
     })
 }

@@ -14,6 +14,7 @@ pub mod clamd;
 pub mod digikey;
 pub mod footprints;
 pub mod grid_presets;
+pub mod jlcparts;
 pub mod lookup;
 pub mod lookups;
 pub mod mouser;
@@ -277,4 +278,7 @@ pub fn routes() -> Router<AppState> {
         // TrustedParts.com — live cross-distributor compare modal.
         // Results are NOT persisted (TOS forbids storage >7d).
         .route("/api/lookup/trustedparts/compare", post(trustedparts::compare))
+        // jlcparts — local LCSC / JLCPCB cross-reference from the
+        // weekly-mirrored cache.sqlite3.
+        .route("/api/lookup/jlcparts/cross_ref", post(jlcparts::cross_ref))
 }

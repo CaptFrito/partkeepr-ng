@@ -32,6 +32,7 @@ pub struct AppState {
     pub mouser: handlers::mouser::MouserConfig,
     pub digikey: handlers::digikey::DigiKeyConfig,
     pub trustedparts: handlers::trustedparts::TrustedPartsConfig,
+    pub jlcparts: handlers::jlcparts::JlcPartsConfig,
 }
 
 impl FromRef<AppState> for MySqlPool {
@@ -54,6 +55,9 @@ impl FromRef<AppState> for handlers::digikey::DigiKeyConfig {
 }
 impl FromRef<AppState> for handlers::trustedparts::TrustedPartsConfig {
     fn from_ref(s: &AppState) -> Self { s.trustedparts.clone() }
+}
+impl FromRef<AppState> for handlers::jlcparts::JlcPartsConfig {
+    fn from_ref(s: &AppState) -> Self { s.jlcparts.clone() }
 }
 
 #[tokio::main]
@@ -91,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
     let mouser = handlers::mouser::MouserConfig::from_env();
     let digikey = handlers::digikey::DigiKeyConfig::from_env();
     let trustedparts = handlers::trustedparts::TrustedPartsConfig::from_env();
-    let state = AppState { pool, store, signer, printing, mouser, digikey, trustedparts };
+    let jlcparts = handlers::jlcparts::JlcPartsConfig::from_env().await;
+    let state = AppState { pool, store, signer, printing, mouser, digikey, trustedparts, jlcparts };
 
     // Frontend is served as static assets out of this directory. Default
     // is "../frontend" relative to the backend cwd (matches the dev

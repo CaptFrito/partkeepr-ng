@@ -1,0 +1,750 @@
+#!/usr/bin/env python3
+
+import csv
+import json
+import os
+import sqlite3
+import time
+import urllib.parse
+from contextlib import contextmanager
+from pathlib import Path
+from textwrap import indent
+
+from .lcsc import makeLcscRequest
+
+if os.environ.get("JLCPARTS_DEV", "0") == "1":
+    print("Using caching from /tmp/jlcparts")
+    CACHE_PATH = Path("/tmp/jlcparts")
+    CACHE_PATH.mkdir(parents=True, exist_ok=True)
+else:
+    CACHE_PATH = None
+
+def normalizeCategoryName(catname):
+    return catname
+    # If you want to normalize category names, don't; you will break LCSC links!
+    # return catname.replace("?", "")
+
+def lcscToDb(val):
+    return int(val[1:])
+
+def lcscFromDb(val):
+    return f"C{val}"
+
+def dbToComp(comp):
+    comp = dict(comp)
+    comp["lcsc"] = lcscFromDb(comp["lcsc"])
+    comp["price"] = json.loads(comp["price"])
+    comp["extra"] = json.loads(comp["extra"] or "{}")
+    comp["jlc_extra"] = json.loads(comp.get("jlc_extra") or "{}")
+    comp["basic"] = bool(comp["basic"])
+    comp["preferred"] = bool(comp["preferred"])
+    return comp
+
+def _jsonLoadsDict(value):
+    if not value:
+        return {}
+    try:
+        result = json.loads(value)
+    except Exception:
+        return {}
+    return result if isinstance(result, dict) else {}
+
+def _manufacturerFromExtra(extra):
+    if not isinstance(extra, dict):
+        return ""
+    manufacturer = extra.get("manufacturer", {})
+    if isinstance(manufacturer, dict):
+        return (
+            manufacturer.get("name")
+            or manufacturer.get("en")
+            or manufacturer.get("abbr")
+            or ""
+        )
+    if isinstance(manufacturer, str):
+        return manufacturer
+    return ""
+
+def _componentManufacturer(component):
+    return (
+        component.get("manufacturer")
+        or _manufacturerFromExtra(component.get("extra", {}))
+        or _manufacturerFromExtra(component.get("jlc_extra", {}))
+        or ""
+    )
+
+class PartLibraryDb:
+    def __init__(self, filepath=None):
+        self.conn = sqlite3.connect(filepath)
+        self.conn.row_factory = sqlite3.Row
+        self.transation = False
+        self.categoryCache = {}
+        self.manufacturerCache = {}
+
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS components (
+                lcsc INTEGER PRIMARY KEY NOT NULL,
+                category_id INTEGER NOT NULL,
+                mfr TEXT NOT NULL,
+                package TEXT NOT NULL,
+                joints INTEGER NOT NULL,
+                manufacturer_id INTEGER NOT NULL,
+                basic INTEGER NOT NULL,
+                preferred INTEGER NOT NULL DEFAULT 0,
+                description TEXT NOT NULL,
+                datasheet TEXT NOT NULL,
+                stock INTEGER NOT NULL,
+                price TEXT NOT NULL,
+                last_update INTEGER NOT NULL,
+                extra TEXT,
+                flag INTEGER NOT NULL DEFAULT 0
+            )""")
+
+        # Perform migration if we miss last on stock
+        migrated = False
+        columns = list(self.conn.execute("pragma table_info(components)"))
+        if "last_on_stock" not in [x[1] for x in columns]:
+            self.conn.execute("""
+                ALTER TABLE components ADD COLUMN last_on_stock INTEGER NOT NULL DEFAULT 0;
+            """)
+            migrated = True
+
+        # Perform migration if we miss the preferred flag
+        if "preferred" not in [x[1] for x in columns]:
+            self.conn.execute("""
+                ALTER TABLE components ADD COLUMN preferred INTEGER NOT NULL DEFAULT 0;
+            """)
+            migrated = True
+
+        if "jlc_extra" not in [x[1] for x in columns]:
+            self.conn.execute("""
+                ALTER TABLE components ADD COLUMN jlc_extra TEXT NOT NULL DEFAULT '{}';
+            """)
+            migrated = True
+
+        if migrated:
+            self.conn.execute("DROP VIEW IF EXISTS v_components")
+
+        self.conn.execute("""
+            CREATE INDEX IF NOT EXISTS components_category
+            ON components (category_id)
+            """)
+        self.conn.execute("""
+            CREATE INDEX IF NOT EXISTS components_manufacturer
+            ON components (manufacturer_id)
+            """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS manufacturers (
+                id INTEGER PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+            UNIQUE (id, name)
+            )""")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY NOT NULL,
+                category TEXT NOT NULL,
+                subcategory TEXT NOT NULL,
+            UNIQUE (id, category, subcategory)
+            )""")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS jlcpcb_component_details (
+                lcsc INTEGER PRIMARY KEY NOT NULL,
+                fetched_at INTEGER NOT NULL,
+                payload TEXT NOT NULL
+            )""")
+        self.conn.execute("""
+            CREATE VIEW IF NOT EXISTS v_components AS
+                SELECT
+                    c.lcsc AS lcsc,
+                    c.category_id AS category_id,
+                    cat.category AS category,
+                    cat.subcategory AS subcategory,
+                    c.mfr AS mfr,
+                    c.package AS package,
+                    c.joints AS joints,
+                    m.name AS manufacturer,
+                    c.basic AS basic,
+                    c.preferred as preferred,
+                    c.description AS description,
+                    c.datasheet AS datasheet,
+                    c.stock AS stock,
+                    c.last_on_stock as last_on_stock,
+                    c.price AS price,
+                    c.extra AS extra,
+                    c.jlc_extra AS jlc_extra
+                FROM components c
+                LEFT JOIN manufacturers m ON c.manufacturer_id = m.id
+                LEFT JOIN categories cat ON c.category_id = cat.id
+            """)
+        self.conn.commit()
+
+    def _commit(self):
+        """
+        Commits automatically if no transaction is opened
+        """
+        if not self.transation:
+            self.conn.commit()
+
+    def vacuum(self):
+        self.conn.execute("VACUUM")
+
+    def resetFlag(self, value=0):
+        self.conn.execute("UPDATE components SET flag = ?", (value,))
+        self._commit()
+
+    def countFlag(self, value=0):
+        return self.conn.execute("SELECT COUNT() FROM components  WHERE flag = ?",
+                                 (value,)).fetchone()[0]
+
+    def countCategories(self,):
+        return self.conn.execute("SELECT COUNT() FROM categories").fetchone()[0]
+
+    def removeWithFlag(self, value=1):
+        self.conn.execute("""
+            DELETE FROM jlcpcb_component_details
+            WHERE lcsc IN (SELECT lcsc FROM components WHERE flag = ?)
+            """, (value,))
+        self.conn.execute("DELETE FROM components WHERE flag = ?", (value,))
+        self._commit()
+
+    @contextmanager
+    def startTransaction(self):
+        assert self.transation == False
+        try:
+            with self.conn:
+                self.transation = True
+                yield self
+        finally:
+            self.transation = False
+
+    def close(self):
+        self.conn.close()
+
+    def getComponent(self, lcscNumber):
+        result = self.conn.execute("""
+            SELECT * FROM v_components
+                WHERE lcsc = ?
+                LIMIT 1
+            """, (lcscToDb(lcscNumber),)).fetchone()
+        return dbToComp(result)
+
+    def exists(self, lcscNumber):
+        result = self.conn.execute("""
+            SELECT lcsc FROM components
+                WHERE lcsc = ?
+                LIMIT 1
+            """, (lcscToDb(lcscNumber),)).fetchone()
+        return result is not None
+
+    def getCategoryId(self, category, subcategory):
+        c = (category, subcategory)
+        catId = self.categoryCache.get(c, None)
+        if catId is not None:
+            return catId
+        catId = self.conn.execute("""
+            SELECT id FROM categories WHERE category = ? AND subcategory = ?
+            """, c).fetchone()
+        if catId is not None:
+            catId = catId[0]
+        return catId
+
+    def getOrCreateCategoryId(self, category, subcategory):
+        catId = self.getCategoryId(category, subcategory)
+        if catId is not None:
+            return catId
+        c = (category, subcategory)
+        cur = self.conn.cursor()
+        cur.execute("""
+                INSERT INTO categories (category, subcategory) VALUES (?, ?)
+                """, c)
+        catId = cur.lastrowid
+        self._commit()
+        self.categoryCache[c] = catId
+        return catId
+
+    def getOrCreateManufacturerId(self, manufacturer):
+        cur = self.conn.cursor()
+        manId = self.manufacturerCache.get(manufacturer, None)
+        if manId is None:
+            manId = cur.execute("""
+                SELECT id FROM manufacturers WHERE name = ?
+                """, (manufacturer,)).fetchone()
+            if manId is not None:
+                manId = manId[0]
+        if manId is None:
+            cur.execute("""
+                INSERT INTO manufacturers (name) VALUES (?)
+                """, (manufacturer,))
+            manId = cur.lastrowid
+        self.manufacturerCache[manufacturer] = manId
+        return manId
+
+    def getCategoryComponents(self, category, subcategory, stockNewerThan=None):
+        """
+        Return an iterable of category components that have been in stock in the
+        last stockNewerThan
+        """
+        return list(self.iterCategoryComponents(category, subcategory, stockNewerThan))
+
+    def countCategoryComponents(self, category, subcategory, stockNewerThan=None):
+        catId = self.getCategoryId(category, subcategory)
+        if catId is None:
+            return 0
+        if stockNewerThan is None:
+            result = self.conn.execute("""
+                SELECT COUNT()
+                FROM components
+                WHERE category_id = ?
+                """, (catId,))
+        else:
+            result = self.conn.execute("""
+                SELECT COUNT()
+                FROM components
+                WHERE category_id = ? and last_on_stock > ?
+                """, (catId, int(time.time()) - stockNewerThan * 24 * 3600))
+        return result.fetchone()[0]
+
+    def iterCategoryComponents(self, category, subcategory, stockNewerThan=None, fetchSize=1000):
+        """
+        Yield category components lazily. This is the memory-safe variant used by
+        the frontend table builder for large subcategories.
+        """
+        catId = self.getCategoryId(category, subcategory)
+        if catId is None:
+            return
+        if stockNewerThan is None:
+            cursor = self.conn.cursor().execute("""
+                SELECT * FROM v_components WHERE category_id = ?
+                """, (catId,))
+        else:
+            cursor = self.conn.cursor().execute("""
+                SELECT * FROM v_components WHERE category_id = ? and last_on_stock > ?
+                """, (catId, int(time.time()) - stockNewerThan * 24 * 3600))
+        while True:
+            rows = cursor.fetchmany(fetchSize)
+            if not rows:
+                break
+            for row in rows:
+                yield dbToComp(row)
+
+    def addComponent(self, component, flag=None):
+        cur = self.conn.cursor()
+        manId = self.getOrCreateManufacturerId(_componentManufacturer(component))
+
+        catId = self.getOrCreateCategoryId(component["category"], component["subcategory"])
+
+        c = component
+        lastOnStock = int(time.time()) if int(c["stock"]) != 0 else 0
+        data = [lcscToDb(c["lcsc"]), catId, c["mfr"], c["package"], c["joints"], manId,
+                c["basic"], c["description"], c["datasheet"], c["stock"],
+                json.dumps(c["price"]), int(time.time()), lastOnStock, json.dumps(c["extra"]),
+                json.dumps(c.get("jlc_extra", {}))]
+        if flag is not None:
+            data.append(flag)
+        cur.execute(f"""
+            INSERT INTO components
+                (lcsc, category_id, mfr, package, joints, manufacturer_id,
+                basic, description, datasheet, stock, price, last_update, last_on_stock,
+                extra, jlc_extra {', flag' if flag is not None else ''})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? {', ?' if flag is not None else ''})
+            """, data)
+        self._storeJlcRawPayload(c["lcsc"], c.get("jlc_raw"))
+        self._commit()
+
+    def updateExtra(self, lcsc, extra):
+        manufacturer = _manufacturerFromExtra(extra)
+        manId = self.getOrCreateManufacturerId(manufacturer) if manufacturer else None
+        self.conn.execute(f"""
+            UPDATE components
+            SET extra = ?,
+                last_update = ?
+                {', manufacturer_id = ?' if manId is not None else ''}
+            WHERE lcsc = ?
+            """, (
+                json.dumps(extra),
+                int(time.time()),
+                *([manId] if manId is not None else []),
+                lcscToDb(lcsc)
+            ))
+        self._commit()
+
+    def updateJlcPart(self, component, flag=None):
+        """
+        Return if the update was successful or not
+        """
+        c = component
+        stock = int(c["stock"])
+        cursor = self.conn.cursor()
+
+        data = [c["mfr"],
+                c["package"],
+                c["joints"],
+                c["basic"],
+                c["description"],
+                c["datasheet"],
+                stock,
+                json.dumps(c["price"]),
+                json.dumps(c.get("jlc_extra", {}))]
+        if flag is not None:
+            data.append(flag)
+        if stock != 0:
+            data.append(int(time.time()))
+        manufacturer = _componentManufacturer(c)
+        currentManufacturer = cursor.execute("""
+            SELECT m.name
+            FROM components c
+            LEFT JOIN manufacturers m ON c.manufacturer_id = m.id
+            WHERE c.lcsc = ?
+            """, (lcscToDb(c["lcsc"]),)).fetchone()
+        updateManufacturer = manufacturer and (
+            currentManufacturer is None or not currentManufacturer["name"]
+        )
+        if updateManufacturer:
+            data.append(self.getOrCreateManufacturerId(manufacturer))
+        data.append(lcscToDb(c["lcsc"]))
+
+        res = cursor.execute(f"""
+            UPDATE components
+            SET mfr = ?,
+                package = ?,
+                joints = ?,
+                basic = ?,
+                description = ?,
+                datasheet = ?,
+                stock = ?,
+                price = ?,
+                jlc_extra = ?
+                {', flag = ?' if flag is not None else ''}
+                {', last_on_stock = ?' if stock != 0 else ''}
+                {', manufacturer_id = ?' if updateManufacturer else ''}
+            WHERE lcsc = ?
+            """, data)
+        self._storeJlcRawPayload(c["lcsc"], c.get("jlc_raw"))
+        self._commit()
+
+    def setPreferred(self, lcscSet):
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE components SET preferred = 0")
+        cursor.execute(f"UPDATE components SET preferred = 1 WHERE lcsc IN ({','.join(len(lcscSet) * ['?'])})",
+                       [lcscToDb(x) for x in lcscSet])
+        self._commit()
+
+    def categories(self):
+        res = {}
+        for x in self.conn.cursor().execute("SELECT id, category, subcategory FROM categories"):
+            category = x["category"]
+            subcat = x["subcategory"]
+            if category in res:
+                res[category].append(subcat)
+            else:
+                res[category] = [subcat]
+            self.categoryCache[(category, subcat)] = x["id"]
+        return res
+
+    def delete(self, lcscNumber):
+        self.conn.execute("DELETE FROM jlcpcb_component_details WHERE lcsc = ?",
+                          (lcscToDb(lcscNumber),))
+        self.conn.execute("DELETE FROM components WHERE lcsc = ?", (lcscToDb(lcscNumber),))
+        self._commit()
+
+    def _storeJlcRawPayload(self, lcscNumber, payload):
+        if not isinstance(payload, dict) or not payload:
+            return
+        self.conn.execute("""
+            INSERT INTO jlcpcb_component_details (lcsc, fetched_at, payload)
+            VALUES (?, ?, ?)
+            ON CONFLICT(lcsc) DO UPDATE
+            SET fetched_at = excluded.fetched_at,
+                payload = excluded.payload
+            """, (
+                lcscToDb(lcscNumber),
+                int(time.time()),
+                json.dumps(payload, separators=(",", ":"), sort_keys=True)
+            ))
+
+    def getJlcRawPayload(self, lcscNumber):
+        result = self.conn.execute("""
+            SELECT payload
+            FROM jlcpcb_component_details
+            WHERE lcsc = ?
+            LIMIT 1
+            """, (lcscToDb(lcscNumber),)).fetchone()
+        if result is None:
+            return {}
+        return _jsonLoadsDict(result["payload"])
+
+    def getNOldest(self, count):
+        cursor = self.conn.cursor()
+        result = cursor.execute("SELECT lcsc FROM components ORDER BY last_update ASC LIMIT ?", (count,))
+        return map(lambda x: lcscFromDb(x["lcsc"]), result)
+
+    def getMissingExtra(self, count):
+        if count == 0:
+            return []
+        cursor = self.conn.cursor()
+        result = cursor.execute("""
+            SELECT lcsc
+            FROM components
+            WHERE extra IS NULL OR extra = '' OR extra = '{}'
+            ORDER BY last_update ASC
+            LIMIT ?
+            """, (count,))
+        return map(lambda x: lcscFromDb(x["lcsc"]), result)
+
+
+class PartLibrary:
+    def __init__(self, filepath=None):
+        if filepath is None:
+            self.lib = {}
+            self.index = {}
+            return
+        with open(filepath, "r") as f:
+            self.lib = json.load(f)
+
+        # Normalize category names
+        for _, category in self.lib.items():
+            keys = list(category.keys())
+            for k in keys:
+                category[normalizeCategoryName(k)] = category.pop(k)
+        keys = list(self.lib.keys())
+        for k in keys:
+            self.lib[normalizeCategoryName(k)] = self.lib.pop(k)
+
+        self.buildIndex()
+        self.checkLibraryStructure()
+
+    def buildIndex(self):
+        index = {}
+        for catName, category in self.lib.items():
+            for subCatName, subcategory in category.items():
+                for component in subcategory.keys():
+                    if component in index:
+                        raise RuntimeError(f"Component {component} is in multiple categories")
+                    index[component] = (catName, subCatName)
+        self.index = index
+
+    def checkLibraryStructure(self):
+        # ToDo
+        pass
+
+    def getComponent(self, lcscNumber):
+        if lcscNumber not in self.index:
+            return None
+        cat, subcat = self.index[lcscNumber]
+        return self.lib[cat][subcat][lcscNumber]
+
+    def exists(self, lcscNumber):
+        return lcscNumber in self.index
+
+    def addComponent(self, component):
+        cat = component["category"]
+        subcat = component["subcategory"]
+        if cat not in self.lib:
+            self.lib[cat] = {}
+        if subcat not in self.lib[cat]:
+            self.lib[cat][subcat] = {}
+        self.lib[cat][subcat][component["lcsc"]] = component
+        self.index[component["lcsc"]] = (cat, subcat)
+
+    def categories(self):
+        """
+        Return a dict with list of available categories in form category ->
+        [subcategory]
+        """
+        return { category: subcategories.keys() for category, subcategories in self.lib.items()}
+
+    def delete(self, lcscNumber):
+        cat, subcat = self.index[lcscNumber]
+        del self.lib[cat][subcat][lcscNumber]
+        del self.index[lcscNumber]
+
+    def deleteNOldest(self, count):
+        if count == 0:
+            return set()
+        components = [self.getComponent(x) for x in self.index.keys()]
+        components.sort(key=lambda x: x["extraTimestamp"] if "extraTimestamp" in x else 0)
+        deleted = []
+        for i in range(count):
+            deleted.append(components[i]["lcsc"])
+            self.delete(components[i]["lcsc"])
+        return set(deleted)
+
+    def save(self, filename):
+        with open(filename, "w") as f:
+            json.dump(self.lib, f)
+
+def loadPartLibrary(file):
+    lib = json.load(file)
+    checkLibraryStructure(lib)
+    return lib
+
+def _csvDictReader(file):
+    sample = file.read(4096)
+    file.seek(0)
+    dialect = csv.Sniffer().sniff(sample, delimiters=",;")
+    return csv.DictReader(file, dialect=dialect)
+
+def parsePrice(priceString):
+    prices = []
+    if len(priceString.strip()) == 0:
+        return []
+    for price in priceString.split(","):
+        if len(price) == 0:
+            continue
+        range, p = tuple(price.split(":"))
+        qFrom, qTo = range.split("-")
+        prices.append({
+            "qFrom": int(qFrom),
+            "qTo": int(qTo) if qTo else None,
+            "price": float(p)
+        })
+    prices.sort(key=lambda x: x["qFrom"])
+    return prices
+
+
+def normalizeUrlPart(part):
+    if part is None:
+        return ""
+    if not isinstance(part, str):
+        part = str(part)
+    return (part
+        .replace("(", "")
+        .replace(")", "")
+        .replace(" ", "-")
+        .replace("/", "-")
+    )
+
+
+def _nestedString(value, *path):
+    for key in path:
+        if not isinstance(value, dict):
+            return ""
+        value = value.get(key)
+    return normalizeUrlPart(value)
+
+
+def _buildLcscProductUrl(params):
+    catalogName = _nestedString(params, "category", "name2")
+    manufacturer = _nestedString(params, "manufacturer", "name")
+    product = _nestedString(params, "title")
+    number = params.get("number") if isinstance(params, dict) else None
+    if number is None:
+        number = ""
+    elif not isinstance(number, str):
+        number = str(number)
+
+    if not all([catalogName, manufacturer, product, number]):
+        return None
+
+    return (
+        "https://lcsc.com/product-detail/"
+        f"{urllib.parse.quote_plus(catalogName)}_"
+        f"{urllib.parse.quote_plus(manufacturer)}-"
+        f"{urllib.parse.quote_plus(product)}_"
+        f"{urllib.parse.quote_plus(number)}.html"
+    )
+
+class FetchError(RuntimeError):
+    def __init__(self, message, reason=None):
+        super().__init__(message)
+        self.reason = reason
+
+def getLcscExtraNew(lcscNumber, retries=10):
+    timeouts = [
+        "502 Bad Gateway",
+        "504 Gateway Time-out",
+        "504 ERROR",
+        "Too Many Requests",
+        "Please try again in a few minutes",
+        "403 Forbidden"
+    ]
+
+    try:
+        if retries == 0:
+            raise FetchError("Too many retries", None)
+        # Try to load fetched data from cache - useful when developing (saves time
+        # to fetch)
+        try:
+            if CACHE_PATH is None:
+                raise RuntimeError("Cache not used")
+            with open(CACHE_PATH / f"{lcscNumber}.json") as f:
+                resJson = json.load(f)
+            params = resJson["result"]
+        except:
+            # Not in cache, fetch
+            res = None
+            resJson = None
+            try:
+                res = makeLcscRequest(f"https://ips.lcsc.com/rest/wmsc2agent/product/info/{lcscNumber}")
+                if res.status_code != 200:
+                    if any([x in res.text for x in timeouts]):
+                        raise TimeoutError(res.text)
+                resJson = res.json()
+                if resJson["code"] in [563, 564, 429]:
+                    # The component was not found on LCSC - probably discontinued
+                    return {}
+                if resJson["code"] != 200:
+                    if resJson["code"] == 437:  # Rate limit exceeded
+                        print(f"Rate limit exceeded for {lcscNumber}. Retrying in 1 minute... ({retries-1} retries left)")
+                        time.sleep(60)
+                        return getLcscExtraNew(lcscNumber, retries=retries-1)
+                    else:
+                        raise RuntimeError(f"{resJson['code']}: {resJson['message']}")
+                params = resJson["result"]
+            except TimeoutError as e:
+                raise e from None
+            except Exception as e:
+                message = f"{res.status_code}: {res.text}"
+                raise FetchError(message, e) from None
+            # Save to cache, make development more pleasant
+            if CACHE_PATH is not None:
+                with open(CACHE_PATH / f"{lcscNumber}.json", "w") as f:
+                    json.dump(resJson, f)
+
+        url = _buildLcscProductUrl(params)
+        if url is not None:
+            params["url"] = url
+
+        return params
+    except TimeoutError as e:
+        time.sleep(60)
+        return getLcscExtraNew(lcscNumber, retries=retries-1)
+    except FetchError as e:
+        reason = f"{e}: \n{e.reason}"
+        print(f"Failed {lcscNumber}:\n" + indent(reason, 8 * " "))
+        raise e from None
+
+def loadJlcTable(file):
+    reader = _csvDictReader(file)
+    return { x["LCSC Part"]: {
+                "lcsc": x["LCSC Part"],
+                "category": x["First Category"],
+                "subcategory": x["Second Category"],
+                "mfr": x["MFR.Part"],
+                "package": x["Package"],
+                "joints": int(x["Solder Joint"]),
+                "manufacturer": x["Manufacturer"],
+                "basic": x["Library Type"].lower() == "base",
+                "description": x["Description"],
+                "datasheet": x["Datasheet"],
+                "stock": int(x["Stock"]),
+                "price": parsePrice(x["Price"]),
+                "jlc_extra": _jsonLoadsDict(x.get("JLCPCB Extra"))
+            }   for x in reader }
+
+def loadJlcTableLazy(file):
+    reader = _csvDictReader(file)
+    return map( lambda x: {
+                "lcsc": x["LCSC Part"],
+                "category": x["First Category"],
+                "subcategory": x["Second Category"],
+                "mfr": x["MFR.Part"],
+                "package": x["Package"],
+                "joints": int(x["Solder Joint"]),
+                "manufacturer": x["Manufacturer"],
+                "basic": x["Library Type"].lower() == "base",
+                "description": x["Description"],
+                "datasheet": x["Datasheet"],
+                "stock": int(x["Stock"]),
+                "price": parsePrice(x["Price"]),
+                "jlc_extra": _jsonLoadsDict(x.get("JLCPCB Extra"))
+            }, reader )

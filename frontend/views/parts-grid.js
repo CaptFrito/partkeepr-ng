@@ -947,6 +947,15 @@ function buildRightPane() {
                                 hidden: true,  // shown when capabilities reports trustedparts: { available: true }
                                 click: () => openCompareDistributorsDialog(currentPart),
                             },
+                            {
+                                view: "button",
+                                id: "pk-detail-jlc-btn",
+                                value: "🟡 Cross-ref LCSC",
+                                width: 152,
+                                tooltip: "Match this part against LCSC / JLCPCB's library — useful when ordering a JLC PCBA",
+                                hidden: true,  // shown when capabilities reports jlcparts: { available: true }
+                                click: () => openJlcCrossRefDialog(currentPart),
+                            },
                             {},
                         ],
                     },

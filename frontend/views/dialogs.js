@@ -742,6 +742,12 @@ async function refreshLookupCapabilities() {
         && lookupCapsCache.trustedparts.available) {
         cmpBtn.show();
     }
+    // 🟡 Cross-ref LCSC button — local jlcparts SQLite mirror.
+    const jlcBtn = $$("pk-detail-jlc-btn");
+    if (jlcBtn && lookupCapsCache && lookupCapsCache.jlcparts
+        && lookupCapsCache.jlcparts.available) {
+        jlcBtn.show();
+    }
 }
 
 /// Sources that have `order_status_available: true`. Independent of
@@ -1787,5 +1793,201 @@ async function openCompareDistributorsDialog(part) {
             (kind === "cached" ? " · cached" : "") + tariffNote);
         status.refresh();
         footer.setHTML(`<div style="padding:8px 12px;font-size:12px;color:#6a7a8a">${resp.attribution_html || ""}</div>`);
+    }
+}
+
+// ============================================================
+//  Cross-reference LCSC / JLCPCB (jlcparts)
+// ============================================================
+
+// Per-(MPN, mfg) in-memory cache — same shape as TrustedParts compare.
+// Local SQLite is already cheap to query so the cache only saves a few
+// ms; mostly here for consistency.
+const _jlcCache = new Map();
+const _JLC_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function _jlcCacheKey(mpn, manufacturer) {
+    return `${(mpn || "").trim().toLowerCase()}|${(manufacturer || "").trim().toLowerCase()}`;
+}
+
+/// Open the "🟡 Cross-ref LCSC" modal — queries the local jlcparts
+/// SQLite mirror and shows LCSC matches with JLC library-tier flag,
+/// stock, price breaks, and a link out to each row's LCSC product page.
+/// Especially useful when planning a JLCPCB SMT-assembly order:
+/// Basic-library parts are free to place, Extended cost a per-design
+/// fee, so the operator wants to know upfront which tier their parts
+/// land in.
+async function openJlcCrossRefDialog(part) {
+    if (!part || !part.id) {
+        webix.message({ type: "error", text: "No part selected." });
+        return;
+    }
+    const mpn = part.manufacturers && part.manufacturers[0] && part.manufacturers[0].part_number
+        ? part.manufacturers[0].part_number.trim()
+        : (part.name || "").trim();
+    const manufacturer = part.manufacturers && part.manufacturers[0]
+        ? (part.manufacturers[0].manufacturer_name || "").trim()
+        : "";
+    if (!mpn) {
+        webix.message({ type: "error",
+            text: "Part has no manufacturer part number — add one on the Manufacturers tab first." });
+        return;
+    }
+
+    const winId = "pk-jlc-dialog";
+    if ($$(winId)) { $$(winId).destructor(); }
+
+    webix.ui({
+        view: "window",
+        id: winId,
+        modal: true,
+        position: "center",
+        width: 1180,
+        height: 600,
+        head: `Cross-reference on LCSC — ${mpn}${manufacturer ? " · " + manufacturer : ""}`,
+        body: {
+            rows: [
+                {
+                    view: "toolbar",
+                    css: "pk-pane-toolbar",
+                    height: 40,
+                    cols: [
+                        { view: "label", id: "pk-jlc-status",
+                          label: "Querying local jlcparts mirror…", css: "pk-pane-title" },
+                        {},
+                        { view: "button", value: "↻ Refresh", width: 110,
+                          tooltip: "Bypass the in-memory cache (does not refresh the underlying DB — that's the cron job's job)",
+                          click: () => runJlcQuery(true) },
+                    ],
+                },
+                {
+                    view: "datatable",
+                    id: "pk-jlc-grid",
+                    css: "pk-grid",
+                    select: false,
+                    columns: [
+                        { id: "_lcsc", header: "LCSC#", width: 110,
+                          template: function (o) {
+                              const code = "C" + o.lcsc;
+                              if (!o.lcsc_url) return escapeHtml(code);
+                              return `<a href="${escapeHtml(o.lcsc_url)}" target="_blank" rel="noopener">${escapeHtml(code)}</a>`;
+                          },
+                        },
+                        { id: "mfr", header: "MPN", width: 180 },
+                        { id: "manufacturer", header: "Manufacturer", width: 180 },
+                        { id: "package", header: "Package", width: 130 },
+                        { id: "_tier", header: "Tier", width: 90,
+                          template: function (o) {
+                              if (o.tier === "Basic") return `<span class="pk-stock-add">Basic</span>`;
+                              if (o.tier === "Preferred") return `<span style="color:#2a6fb0">Preferred</span>`;
+                              return `<span class="pk-help-hint">Extended</span>`;
+                          },
+                        },
+                        { id: "stock", header: { text: "Stock", css: "pk-th-numeric" },
+                          width: 100, css: "pk-numeric",
+                          template: function (o) {
+                              if (o.stock > 0) {
+                                  return `<span class="pk-stock-add">${o.stock.toLocaleString()}</span>`;
+                              }
+                              return `<span class="pk-stock-remove">0</span>`;
+                          },
+                        },
+                        { id: "_price1", header: { text: "@1", css: "pk-th-numeric" },
+                          width: 90, css: "pk-numeric",
+                          template: function (o) {
+                              const p = (o.price_breaks || [])[0];
+                              return p ? `$${p.price.toFixed(4)}` : "";
+                          },
+                        },
+                        { id: "_price100", header: { text: "@100+", css: "pk-th-numeric" },
+                          width: 90, css: "pk-numeric",
+                          template: function (o) {
+                              const breaks = o.price_breaks || [];
+                              const target = breaks.find((b) => b.qty_from >= 100) || breaks[breaks.length - 1];
+                              return target ? `$${target.price.toFixed(4)}` : "";
+                          },
+                        },
+                        { id: "_datasheet", header: "Datasheet", width: 100,
+                          template: function (o) {
+                              if (!o.datasheet) return "";
+                              return `<a href="${escapeHtml(o.datasheet)}" target="_blank" rel="noopener">📄</a>`;
+                          },
+                        },
+                        { id: "description", header: "Description", fillspace: true, minWidth: 160 },
+                    ],
+                    data: [],
+                },
+                {
+                    view: "template",
+                    id: "pk-jlc-footer",
+                    borderless: true,
+                    height: 30,
+                    css: "pk-help-hint",
+                    template: '<div style="padding:6px 12px;font-size:11px;color:#6a7a8a"></div>',
+                },
+                {
+                    cols: [
+                        {},
+                        { view: "button", value: "Close", width: 100,
+                          click: () => $$(winId) && $$(winId).destructor() },
+                    ],
+                },
+            ],
+        },
+    }).show();
+
+    runJlcQuery(false);
+
+    async function runJlcQuery(bypassCache) {
+        const status = $$("pk-jlc-status");
+        const grid = $$("pk-jlc-grid");
+        const footer = $$("pk-jlc-footer");
+        if (!status || !grid || !footer) return;
+        status.define("label", "Querying local jlcparts mirror…");
+        status.refresh();
+
+        const cacheKey = _jlcCacheKey(mpn, manufacturer);
+        const now = Date.now();
+        if (!bypassCache) {
+            const hit = _jlcCache.get(cacheKey);
+            if (hit && (now - hit.ts) < _JLC_CACHE_TTL_MS) {
+                renderResults(hit.resp, "cached");
+                return;
+            }
+        }
+
+        try {
+            const resp = await api.lookupJlcCrossRef(mpn, manufacturer || null);
+            _jlcCache.set(cacheKey, { ts: now, resp });
+            renderResults(resp, "live");
+        } catch (e) {
+            console.error(e);
+            grid.clearAll();
+            status.define("label", "Query failed");
+            status.refresh();
+            footer.setHTML(`<div style="padding:6px 12px;font-size:11px;color:#aa2a2a">${escapeHtml(e.message || String(e))}</div>`);
+        }
+    }
+
+    function renderResults(resp, kind) {
+        const status = $$("pk-jlc-status");
+        const grid = $$("pk-jlc-grid");
+        const footer = $$("pk-jlc-footer");
+        if (!status || !grid || !footer) return;
+        const rows = (resp.matches || []).map((m, i) => Object.assign({ id: i + 1 }, m));
+        grid.clearAll();
+        grid.parse(rows);
+        // Count by tier for the status line.
+        const tiers = rows.reduce((acc, m) => { acc[m.tier] = (acc[m.tier]||0)+1; return acc; }, {});
+        const tierBits = ["Basic", "Preferred", "Extended"]
+            .filter(t => tiers[t])
+            .map(t => `${tiers[t]} ${t}`)
+            .join(", ");
+        status.define("label",
+            `${rows.length} match${rows.length === 1 ? "" : "es"}` +
+            (tierBits ? ` (${tierBits})` : "") +
+            (kind === "cached" ? " · cached" : ""));
+        status.refresh();
+        footer.setHTML(`<div style="padding:6px 12px;font-size:11px;color:#6a7a8a">${resp.attribution_html || ""}</div>`);
     }
 }

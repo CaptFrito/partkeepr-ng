@@ -569,6 +569,16 @@ const api = {
         if (!r.ok) throw new Error((data && data.error) || `trustedparts compare failed: ${r.status}`);
         return data;
     },
+    async lookupJlcCrossRef(mpn, manufacturer) {
+        const r = await fetch("/api/lookup/jlcparts/cross_ref", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mpn, manufacturer }),
+        });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error((data && data.error) || `jlcparts cross-ref failed: ${r.status}`);
+        return data;
+    },
     async lookupSearch(source, q, by) {
         const r = await fetch(`/api/lookup/${encodeURIComponent(source)}/search`, {
             method: "POST",
