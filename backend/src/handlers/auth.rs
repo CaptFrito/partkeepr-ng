@@ -280,13 +280,19 @@ pub async fn login(
     };
     let cookie_value = signer.encode(&session)?;
 
+    // PARTKEEPR_SECURE_COOKIES=true forces the Secure attribute on
+    // the session cookie. Set this in production (behind an https
+    // reverse proxy); leave unset for local dev over plain http.
+    let secure = std::env::var("PARTKEEPR_SECURE_COOKIES")
+        .ok()
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+
     let cookie = Cookie::build((SESSION_COOKIE, cookie_value))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Strict)
-        // Don't set Secure here — felder dev runs over plain HTTP.
-        // Production deploy (chrisbuck via TLS) should toggle this on
-        // via env var or by detecting the X-Forwarded-Proto header.
         .max_age(TimeDuration::hours(SESSION_TTL_HOURS))
         .build();
 
