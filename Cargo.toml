@@ -6,7 +6,11 @@ resolver = "2"
 # version here is the SpectraQ overlay release driver — it validates
 # the tagged version against `grep '^version' Cargo.toml`, which fails
 # silently under `set -euo pipefail` if the file has no `version =`
-# line. Backend/Cargo.toml inherits via `version.workspace = true`,
-# keeping the two in lockstep.
+# line. Note: `backend/Cargo.toml` does NOT inherit via
+# `version.workspace = true` — it keeps its own static `version = "X.Y.Z"`
+# because `scripts/make-dist.sh` ships `backend/` standalone (no
+# workspace root in the tarball), so the inherited form can't resolve
+# at build time on chrisbuck. Both files must be bumped together at
+# release time.
 [workspace.package]
 version = "0.1.0"
