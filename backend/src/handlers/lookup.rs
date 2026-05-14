@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Slice 12a — Distributor / catalog lookups (Mouser today, Digi-Key
-//! and Nexar later). This module defines the unified result shape
-//! every source maps into, plus the `/api/lookup/capabilities`
-//! endpoint frontends hit at boot to decide which "+ Add via …"
-//! buttons to render.
+//! Distributor / catalog lookups. Mouser + Digi-Key for *importing*
+//! parts into the local DB; TrustedParts.com for live cross-distributor
+//! compare; jlcparts SQLite mirror for LCSC / JLCPCB cross-reference.
+//! This module defines the unified result shape every import source
+//! maps into, plus the `/api/lookup/capabilities` endpoint frontends
+//! hit at boot to decide which buttons to render.
 //!
-//! Per-source code lives in sibling modules: `mouser.rs`, eventually
-//! `digikey.rs`, `nexar.rs`. They all produce `LookupResult` rows
-//! mapped from their native API.
+//! Per-source code lives in sibling modules (`mouser.rs`, `digikey.rs`,
+//! `trustedparts.rs`, `jlcparts.rs`). Mouser and Digi-Key produce
+//! `LookupResult` rows that the shared `import_lookup_result()`
+//! helper turns into `Part` + `PartManufacturer` + `PartDistributor`
+//! + `PartParameter` + attachment rows. TrustedParts and jlcparts
+//! have their own response shapes (live compare and cross-ref
+//! respectively) and don't persist.
 
 use axum::{extract::State, Json};
 use chrono::Utc;
@@ -23,11 +28,13 @@ use crate::handlers::mouser::MouserConfig;
 use crate::handlers::storage::StorageConfig;
 use crate::handlers::trustedparts::TrustedPartsConfig;
 
-/// Unified search-result shape across all lookup sources. Designed
-/// to fit Mouser today, Digi-Key + Nexar without changes later.
+/// Unified search-result shape used by every import source (currently
+/// Mouser + Digi-Key). The shape was kept generic so a future
+/// distributor with similar response semantics can slot in without
+/// touching consumer code, but no third source is on the roadmap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LookupResult {
-    /// Which source produced this result. "mouser", "digikey", "nexar".
+    /// Which source produced this result. "mouser" or "digikey".
     pub source: String,
     pub mpn: String,
     pub manufacturer_name: String,
@@ -52,8 +59,8 @@ pub struct LookupResult {
     pub lead_time_days: Option<i32>,
     /// Source-provided parameters / product attributes. v1 imports
     /// every entry as a string PartParameter (no unit/prefix
-    /// inference). Mouser's are typically packaging-only; future
-    /// sources (Digi-Key, Nexar) carry richer parametric data.
+    /// inference). Mouser's are typically packaging-only; Digi-Key
+    /// V4 carries the richer parametric data.
     #[serde(default)]
     pub parameters: Vec<LookupResultParameter>,
 }
