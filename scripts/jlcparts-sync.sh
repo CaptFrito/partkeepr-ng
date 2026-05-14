@@ -16,15 +16,26 @@
 # Usage:
 #   ./scripts/jlcparts-sync.sh [-o /var/lib/partkeepr-ng] [-a 4]
 #
-#     -o DIR     destination directory (default: $PARTKEEPR_JLCPARTS_DIR
-#                or /var/lib/partkeepr-ng)
+#     -o DIR     destination directory (default: dirname of
+#                $PARTKEEPR_JLCPARTS_DB_PATH if set, else
+#                $PARTKEEPR_JLCPARTS_DIR, else /var/lib/partkeepr-ng)
 #     -a N       keep N weekly archives (default 4)
 #     -n         dry run — show what would happen, don't act
 #     -h         help
 
 set -euo pipefail
 
-OUT_DIR="${PARTKEEPR_JLCPARTS_DIR:-/var/lib/partkeepr-ng}"
+# Pick the destination dir. Highest priority: -o on the CLI (handled
+# below in getopts). Else read PARTKEEPR_JLCPARTS_DB_PATH (the same
+# env var the daemon reads — single source of truth via /etc/conf.d/),
+# falling back to legacy PARTKEEPR_JLCPARTS_DIR, then the default.
+if [[ -n "${PARTKEEPR_JLCPARTS_DB_PATH:-}" ]]; then
+    OUT_DIR="$(dirname "$PARTKEEPR_JLCPARTS_DB_PATH")"
+elif [[ -n "${PARTKEEPR_JLCPARTS_DIR:-}" ]]; then
+    OUT_DIR="$PARTKEEPR_JLCPARTS_DIR"
+else
+    OUT_DIR="/var/lib/partkeepr-ng"
+fi
 ARCHIVE_DIR_OVERRIDE="${PARTKEEPR_JLCPARTS_ARCHIVE_DIR:-}"
 KEEP_ARCHIVES=4
 DRY_RUN=0
