@@ -1,6 +1,14 @@
 [package]
 name = "partkeepr-api"
-version.workspace = true
+# Two version declarations — this one (consumed by cargo build) and
+# the top-level Cargo.toml's [workspace.package] version (consumed by
+# spectraq-release-driver.sh on chrisbuck via `grep ^version`). Both
+# must be bumped together at release time. We use static versions on
+# both ends because cargo workspace-inheritance breaks the tarball
+# pipeline — the driver's make-dist.sh ships backend/ standalone,
+# without the workspace root, so `version.workspace = true` can't
+# resolve at build time on chrisbuck.
+version = "0.1.0"
 edition = "2021"
 publish = false
 authors = ["Don Bishop <dbishop@spectraq.com>"]
