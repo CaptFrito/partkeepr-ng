@@ -141,6 +141,6 @@ done
 echo
 echo "Done. ${#MIGRATIONS[@]} migration(s) applied to $DB on $HOST."
 echo "Next step: rsync your file-storage tree into PARTKEEPR_STORAGE_DIR,"
-echo "configure backend/.env, and start partkeepr-api."
+echo "configure backend/.env, and start partkeepr-ng."
 echo
 echo "See docs/migrating-from-partkeepr-1.4.0.md for the full procedure."

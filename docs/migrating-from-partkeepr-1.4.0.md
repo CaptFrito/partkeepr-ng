@@ -187,7 +187,7 @@ Add a corresponding `PartKeeprUser` row for any user you want to keep.
 partkeepr-ng never deletes data and never modifies upstream columns. If
 you decide to go back to PartKeepr 1.4.0:
 
-1. Stop `partkeepr-api`.
+1. Stop the `partkeepr-ng` service.
 2. Re-point your 1.4.0 install at the original DB. The new tables
    (`PartStorageLocation`) and new columns (`StockEntry.distributor_id`,
    `salesOrderNumber`, `partStorageLocation_id`) will be ignored by

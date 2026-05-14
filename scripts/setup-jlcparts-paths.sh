@@ -9,7 +9,7 @@
 # Idempotent: re-runs are no-ops. Needs sudo for the /var/lib writes.
 #
 # Production install on chrisbuck does NOT need this — the
-# `app-spectraq/partkeepr-api` ebuild creates /var/lib/partkeepr-ng
+# `app-spectraq/partkeepr-ng` ebuild creates /var/lib/partkeepr-ng
 # with correct ownership during pkg_postinst, and the /etc/cron.d/
 # entry handles the weekly sync.
 #

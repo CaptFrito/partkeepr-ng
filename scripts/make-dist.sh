@@ -5,12 +5,12 @@
 # Vendored Cargo deps so the build doesn't need network on chrisbuck.
 # Run from the project root.
 #
-# Output: /tmp/partkeepr-api-<version>.tar.xz
+# Output: /tmp/partkeepr-ng-<version>.tar.xz
 
 set -euo pipefail
 
 VERSION=$(grep '^version' backend/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-DIST_NAME="partkeepr-api-${VERSION}"
+DIST_NAME="partkeepr-ng-${VERSION}"
 DIST_DIR="/tmp/${DIST_NAME}"
 TARBALL="/tmp/${DIST_NAME}.tar.xz"
 

@@ -85,7 +85,7 @@ PartKeepr tables are the durable interface. To migrate an existing
 3. Run the six additive migrations in `scripts/migrations/` in numeric
    order (or use `scripts/migrate-from-upstream.sh`).
 4. Rsync your file storage tree into `$PARTKEEPR_STORAGE_DIR`.
-5. Set env vars (see `backend/.env.example`) and start `partkeepr-api`.
+5. Set env vars (see `backend/.env.example`) and start the `partkeepr-ng` service.
 
 Full walkthrough: [`docs/migrating-from-partkeepr-1.4.0.md`](docs/migrating-from-partkeepr-1.4.0.md).
 

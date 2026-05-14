@@ -145,4 +145,4 @@ if [[ "${#archives[@]}" -gt "$KEEP_ARCHIVES" ]]; then
 fi
 
 log "done. $DEST is ~$(du -h "$DEST" | awk '{print $1}'), $(ls -1 *.sqlite3.zst 2>/dev/null | wc -l) archive(s) retained."
-log "restart partkeepr-api or just let sqlx re-open on next query."
+log "restart partkeepr-ng or just let sqlx re-open on next query."
