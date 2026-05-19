@@ -219,7 +219,7 @@ in the Compare-distributors modal footer.
 
 ## Authorship
 
-- Don Bishop \<dbishop@spectraq.com\>
+- Capt Frito \<capt.frito@gmail.com\>
 
 This project is a workshop tool. Pull requests are welcome but not
 guaranteed to be reviewed; issues may sit. If you need a feature, fork.
