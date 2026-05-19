@@ -8,7 +8,7 @@ name = "partkeepr-api"
 # pipeline — the driver's make-dist.sh ships backend/ standalone,
 # without the workspace root, so `version.workspace = true` can't
 # resolve at build time on chrisbuck.
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 publish = false
 authors = ["Don Bishop <dbishop@spectraq.com>"]
