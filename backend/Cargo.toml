@@ -8,13 +8,13 @@ name = "partkeepr-api"
 # pipeline — the driver's make-dist.sh ships backend/ standalone,
 # without the workspace root, so `version.workspace = true` can't
 # resolve at build time on chrisbuck.
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 publish = false
 authors = ["Don Bishop <dbishop@spectraq.com>"]
 license = "GPL-3.0-or-later"
 description = "Backend for partkeepr-ng — a Rust+Webix rewrite of PartKeepr 1.4.0 electronic-parts inventory"
-repository = "https://github.com/dbishop/partkeepr-ng"
+repository = "https://github.com/CaptFrito/partkeepr-ng"
 readme = "../README.md"
 # `cargo run` (no --bin) starts the API server. The reset-password
 # binary is for one-off CLI use via `cargo run --bin reset-password`.
