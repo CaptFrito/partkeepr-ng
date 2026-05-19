@@ -1,0 +1,266 @@
+.\" partkeepr-ng.conf(5) - partkeepr-ng environment configuration
+.\" Copyright 2026 Don Bishop <dbishop@spectraq.com>
+.\" Distributed under the terms of the GNU General Public License v3
+.TH PARTKEEPR-NG.CONF 5 "2026-05-19" "partkeepr-ng" "File Formats Manual"
+.SH NAME
+partkeepr-ng.conf, /etc/conf.d/partkeepr-ng \- environment configuration for the partkeepr-ng daemon
+.SH DESCRIPTION
+The file
+.I /etc/conf.d/partkeepr-ng
+is a POSIX shell fragment sourced by
+.I /etc/init.d/partkeepr-ng
+before the daemon is started. Variables marked
+.B export
+become environment variables for
+.BR partkeepr-ng (8).
+.PP
+This file is the live configuration. It is CONFIG_PROTECT'd by Portage,
+so edits survive
+.BR emerge (1)
+upgrades; new versions of the template at install time are offered for
+merge via
+.BR dispatch-conf (1).
+.PP
+A reference of every supported variable, in
+.BR dotenv (5)-style
+format (bare VAR=value, no
+.B export
+keyword), ships at
+.IR /usr/share/partkeepr-ng/api.env.example .
+The two files are NOT interchangeable \(em the shell-syntax conf.d
+file and the dotenv reference have different parsers.
+.SH FILE FORMAT
+Lines are either:
+.IP \(bu 2
+Comments, beginning with
+.BR # .
+.IP \(bu 2
+Empty.
+.IP \(bu 2
+.B export VAR="value"
+\(em a shell variable assignment that the daemon will see via
+.BR std::env (Rust standard library)
+or
+.BR getenv (POSIX).
+.PP
+Double-quote values to avoid surprises with special characters. URL
+passwords and other strings that may contain spaces or shell
+metacharacters MUST be quoted.
+.SH REQUIRED VARIABLES
+The daemon refuses to start without these.
+.TP
+.B DATABASE_URL
+MariaDB connection URL in
+.BR sqlx (3rs)
+format. Schema:
+.IR mysql://USER:PASSWORD@HOST/DATABASE .
+Example:
+.IR mysql://partkeepr:hunter2@localhost/partkeepr .
+.IP
+If the password contains
+.BR @ ,
+.BR : ,
+.BR / ,
+.BR # ,
+.BR % ,
+or whitespace, percent-encode those characters in the URL form (the
+SQL identifier itself does not need encoding). The simplest path is
+to choose a password that uses only letters, digits, and
+.BR -_~.+!*() .
+.TP
+.B PARTKEEPR_SESSION_SECRET
+HMAC signer key for the session cookie. At least 16 characters.
+Generate with:
+.IP
+.nf
+.RS
+openssl rand -base64 48
+.RE
+.fi
+.IP
+Rotating this value invalidates every active session.
+.SH PRODUCTION DEPLOYMENT
+.TP
+.B PARTKEEPR_SECURE_COOKIES
+Boolean (
+.IR true / 1 / yes / on
+all enable;
+.IR false /
+unset disable). When enabled, the daemon issues session cookies with
+the
+.B Secure
+attribute. Required behind an https reverse proxy \(em otherwise the
+browser drops the cookie on subsequent requests and login appears to
+silently fail. Leave unset only for local-http dev. Default:
+.BR false .
+.SH STORAGE PATHS
+.TP
+.B PARTKEEPR_STORAGE_DIR
+Attachment storage root. Daemon writes uploaded attachments here.
+Must be writable as user
+.IR partkeepr .
+Default:
+.IR /var/lib/partkeepr-ng/files .
+.IP
+For larger installs, override to a dedicated filesystem (ZFS dataset,
+btrfs subvolume, separate LVM, etc.) and create the target directory
+as
+.IR partkeepr:partkeepr ,
+mode 0750. The parent directory must already exist; the OpenRC
+initscript honors the override but does not create the parent.
+.TP
+.B PARTKEEPR_FRONTEND_DIR
+Path to the Webix static frontend tree. The daemon's
+.BR tower-http (3rs)::ServeDir
+fallback service loads from here for every non-API request. Default
+for a packaged install:
+.IR /usr/share/partkeepr-ng/frontend .
+.TP
+.B PARTKEEPR_JLCPARTS_DB_PATH
+Optional. Full path to the local jlcparts SQLite mirror (~27 GB
+uncompressed) used by the
+.B Cross-ref LCSC
+feature. When unset or the file is absent, the cross-ref button is
+hidden in the UI. Build the file once with
+.IR /usr/libexec/partkeepr-ng/jlcparts-sync.sh ;
+the weekly cron entry in
+.I /etc/cron.d/partkeepr-ng
+refreshes it (commented out by default).
+.SH OPTIONAL FEATURES
+.TP
+.B BIND_ADDR
+Address the daemon listens on. Default:
+.IR 127.0.0.1:8080 .
+Keep loopback-only when fronted by apache or nginx; never expose
+8080 publicly.
+.TP
+.B PARTKEEPR_CLAMD
+clamd TCP socket
+.RI ( "tcp://127.0.0.1:3310" ).
+When set, uploaded attachments are scanned by ClamAV in-flight. When
+unset, the daemon logs a WARN at startup and uploads are not
+scanned.
+.TP
+.B PARTKEEPR_PTOUCH_BIN
+Path to
+.BR ptouch-print (1)
+for Brother P-touch USB label printers (e.g.
+.IR /usr/bin/ptouch-print ).
+The
+.B Print to D410
+UI button is hidden when this is unset. Note that
+.B ptouch-print
+opens the printer over libusb \(em the printer must be physically
+attached to the host running this daemon. See
+.BR ptouch-print (1).
+.SH DISTRIBUTOR API CREDENTIALS
+Each set of credentials enables one distributor integration. Without
+the credentials, the corresponding feature is hidden in the UI.
+.TP
+.B PARTKEEPR_MOUSER_SEARCH_KEY
+Mouser Search API key for the
+.B Add via Mouser
+lookup workflow.
+.TP
+.B PARTKEEPR_MOUSER_ORDER_KEY
+Mouser Order History API key for the
+.B Receive Mouser Order
+workflow. NOTE: This is a separate key from the Search key (Mouser
+issues one key per "product family"). Mismatching the two is a
+common deployment mistake.
+.TP
+.B PARTKEEPR_DIGIKEY_CLIENT_ID
+.TQ
+.B PARTKEEPR_DIGIKEY_CLIENT_SECRET
+OAuth2 client_credentials pair for the Digi-Key Product Information
+V4 API (search) and Order Status V4 API (receive). Both required to
+enable any Digi-Key feature.
+.TP
+.B PARTKEEPR_DIGIKEY_CUSTOMER_ID
+Numeric customer ID printed on any Digi-Key invoice. Required only
+for the Order Status flow; Digi-Key's V4 endpoint returns
+.B "Account ID must not be 0"
+without it. Search and import work without it.
+.TP
+.B PARTKEEPR_DIGIKEY_BASE_URL
+Optional. Default
+.IR https://api.digikey.com .
+Override to
+.I https://sandbox-api.digikey.com
+for development against the Digi-Key sandbox.
+.TP
+.B PARTKEEPR_TRUSTEDPARTS_API_KEY
+trustedparts.com aggregator key for the
+.B Compare distributors
+modal. Note: the trustedparts TOS forbids storing API data on disk
+for longer than 7 days; the daemon caches in-memory only.
+.SH LOGGING
+.TP
+.B RUST_LOG
+tracing-subscriber filter directive. Default:
+.IR info,partkeepr_api=info,tower_http=info .
+Bump to
+.B debug
+or
+.B trace
+for troubleshooting, then return to
+.B info
+once the issue is found.
+.SH EXAMPLES
+.PP
+.B Minimal config for a fresh production install:
+.PP
+.nf
+.RS
+export DATABASE_URL="mysql://partkeepr:hunter2@localhost/partkeepr"
+export PARTKEEPR_SESSION_SECRET="..."  # openssl rand -base64 48
+export PARTKEEPR_SECURE_COOKIES=true   # behind https proxy
+export BIND_ADDR="127.0.0.1:8080"
+export PARTKEEPR_FRONTEND_DIR="/usr/share/partkeepr-ng/frontend"
+export PARTKEEPR_STORAGE_DIR="/var/lib/partkeepr-ng/files"
+export RUST_LOG="info,partkeepr_api=info,tower_http=info"
+.RE
+.fi
+.PP
+.B Production install with bulk data on a separate filesystem
+(e.g. ZFS):
+.PP
+.nf
+.RS
+# Override storage paths to /srv/partkeepr-ng/ (operator must
+# mkdir + chown the target tree before service start).
+export PARTKEEPR_STORAGE_DIR="/srv/partkeepr-ng/files"
+export PARTKEEPR_JLCPARTS_DB_PATH="/srv/partkeepr-ng/jlcparts.sqlite3"
+.RE
+.fi
+.PP
+.B All optional features enabled:
+.PP
+.nf
+.RS
+export PARTKEEPR_CLAMD="tcp://127.0.0.1:3310"
+export PARTKEEPR_MOUSER_SEARCH_KEY="..."
+export PARTKEEPR_MOUSER_ORDER_KEY="..."
+export PARTKEEPR_DIGIKEY_CLIENT_ID="..."
+export PARTKEEPR_DIGIKEY_CLIENT_SECRET="..."
+export PARTKEEPR_DIGIKEY_CUSTOMER_ID="..."
+export PARTKEEPR_TRUSTEDPARTS_API_KEY="..."
+export PARTKEEPR_PTOUCH_BIN="/usr/bin/ptouch-print"
+.RE
+.fi
+.SH FILES
+.TP
+.I /etc/conf.d/partkeepr-ng
+The configuration file documented here. Live, CONFIG_PROTECT'd.
+.TP
+.I /usr/share/partkeepr-ng/api.env.example
+Dotenv-format reference of every supported variable. NOT a drop-in
+for the conf.d file.
+.SH SEE ALSO
+.BR partkeepr-ng (8),
+.BR openrc-run (8),
+.BR mariadb (1),
+.BR clamd (8),
+.BR ptouch-print (1)
+.SH AUTHOR
+Don Bishop <dbishop@spectraq.com>.

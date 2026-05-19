@@ -1,0 +1,254 @@
+.\" partkeepr-ng(8) - PartKeepr-NG REST API daemon
+.\" Copyright 2026 Don Bishop <dbishop@spectraq.com>
+.\" Distributed under the terms of the GNU General Public License v3
+.TH PARTKEEPR-NG 8 "2026-05-19" "partkeepr-ng" "System Manager's Manual"
+.SH NAME
+partkeepr-ng \- PartKeepr-NG electronic-parts inventory backend
+.SH SYNOPSIS
+.B /usr/bin/partkeepr-api
+.SH DESCRIPTION
+.B partkeepr-ng
+is a Rust+Webix rewrite of the upstream
+.UR https://github.com/partkeepr/PartKeepr
+PartKeepr 1.4.0
+.UE
+electronic-parts inventory application. The backend reads its
+configuration from environment variables (typically set via
+.BR partkeepr-ng.conf (5)),
+serves a Webix-based frontend over HTTP from
+.IR PARTKEEPR_FRONTEND_DIR ,
+and exposes a REST API under
+.I /api/*
+backed by a MariaDB schema compatible with the upstream PartKeepr
+data model plus six additive migrations.
+.PP
+The daemon is normally managed by OpenRC as service
+.B partkeepr-ng
+and runs as the system user
+.IR partkeepr .
+The binary
+.B /usr/bin/partkeepr-api
+keeps the Rust crate name; the service / config / log paths all use
+the project name
+.IR partkeepr-ng .
+.SH OPERATIONS
+.TP
+.B rc-service partkeepr-ng start
+Bring up the daemon. Reads
+.I /etc/conf.d/partkeepr-ng
+for environment variables, connects to the database, runs startup
+invariants (creates the
+.B (NOWHERE)
+default storage location if missing), then binds
+.IR BIND_ADDR .
+.TP
+.B rc-service partkeepr-ng stop
+Graceful shutdown. In-flight requests complete; new connections are
+refused.
+.TP
+.B rc-service partkeepr-ng status
+Report process state. A daemon that crashed during startup will be
+reported as
+.IR crashed ;
+inspect
+.I /var/log/partkeepr-ng/api.log
+for the cause.
+.TP
+.BR rc-update " " add " " partkeepr-ng " " default
+Enable the service at the default runlevel so it starts at boot.
+.SH ENVIRONMENT
+The daemon reads configuration entirely from environment variables.
+The full reference is in
+.BR partkeepr-ng.conf (5);
+a brief operational summary follows.
+.PP
+.B Required
+.RS
+.TP
+.I DATABASE_URL
+MariaDB connection string. Example:
+.IR mysql://partkeepr:PASSWORD@localhost/partkeepr .
+The daemon refuses to start if absent or unreachable.
+.TP
+.I PARTKEEPR_SESSION_SECRET
+HMAC signer key for session cookies. At least 16 characters; generate
+with
+.IR "openssl rand -base64 48" .
+Rotating it invalidates every active session.
+.RE
+.PP
+.B Production deployments behind https
+.RS
+.TP
+.I PARTKEEPR_SECURE_COOKIES
+Set to
+.B true
+when the daemon sits behind an https reverse proxy. Without it, the
+browser drops the session cookie and login silently fails. Default:
+unset (off, for local-http dev).
+.RE
+.PP
+.B Storage paths
+.RS
+.TP
+.I PARTKEEPR_STORAGE_DIR
+Attachment storage root. Daemon-writable. Default:
+.IR /var/lib/partkeepr-ng/files .
+.TP
+.I PARTKEEPR_FRONTEND_DIR
+Static frontend tree. Default for packaged install:
+.IR /usr/share/partkeepr-ng/frontend .
+.TP
+.I PARTKEEPR_JLCPARTS_DB_PATH
+Optional. Path to a local jlcparts SQLite mirror (~27 GB) for the
+LCSC / JLCPCB cross-reference feature. When unset or the file is
+absent, the cross-ref button is hidden.
+.RE
+.PP
+.B Optional: ClamAV
+.RS
+.TP
+.I PARTKEEPR_CLAMD
+clamd TCP socket
+.RI ( "tcp://127.0.0.1:3310" ).
+When set, uploaded attachments are scanned in-flight. When unset,
+the daemon logs a WARN at startup and uploads are not scanned.
+.RE
+.PP
+.B Optional: distributor APIs and label printer
+.RS
+Without each of these keys, the corresponding feature is hidden in
+the UI. See
+.BR partkeepr-ng.conf (5)
+for the full list:
+.IR PARTKEEPR_MOUSER_SEARCH_KEY ,
+.IR PARTKEEPR_MOUSER_ORDER_KEY ,
+.IR PARTKEEPR_DIGIKEY_CLIENT_ID ,
+.IR PARTKEEPR_DIGIKEY_CLIENT_SECRET ,
+.IR PARTKEEPR_DIGIKEY_CUSTOMER_ID ,
+.IR PARTKEEPR_TRUSTEDPARTS_API_KEY ,
+.IR PARTKEEPR_PTOUCH_BIN .
+.RE
+.SH FILES
+.TP
+.I /etc/conf.d/partkeepr-ng
+OpenRC env-var configuration. Sourced by the initscript at start.
+CONFIG_PROTECT'd; preserves edits across upgrades.
+.TP
+.I /etc/init.d/partkeepr-ng
+OpenRC service. Depends on
+.B net
+and
+.B mysql
+(MariaDB's OpenRC service name on Gentoo). Optionally uses
+.B clamd .
+.TP
+.I /etc/logrotate.d/partkeepr-ng
+Weekly rotation; 8 archives; copytruncate (the OpenRC initscript owns
+the log fd, so a signal would lose lines).
+.TP
+.I /etc/cron.d/partkeepr-ng
+Periodic tasks. The jlcparts weekly sync is commented out by default;
+uncomment to enable. The cron wrapper sources
+.I /etc/conf.d/partkeepr-ng
+so
+.I PARTKEEPR_JLCPARTS_DB_PATH
+controls the path in one place.
+.TP
+.I /usr/bin/partkeepr-api
+The daemon binary. Run directly only for foreground debugging:
+.IR ". /etc/conf.d/partkeepr-ng && /usr/bin/partkeepr-api" .
+.TP
+.I /usr/bin/reset-password
+CLI to reset a user's password. Reads
+.I DATABASE_URL
+from the environment. Usage:
+.IR "reset-password USERNAME NEW_PASSWORD" .
+.TP
+.I /usr/libexec/partkeepr-ng/migrate-from-upstream.sh
+Apply the six numbered migrations on top of an existing PartKeepr 1.4.0
+schema. Idempotent. Usage:
+.IR "migrate-from-upstream.sh -u USER -d DATABASE" .
+.TP
+.I /usr/libexec/partkeepr-ng/jlcparts-sync.sh
+Refresh the local jlcparts SQLite mirror (downloads ~2 GB of zip
+shards from yaqwsx.github.io, extracts to ~27 GB).
+.TP
+.I /usr/libexec/partkeepr-ng/jlcparts-sync-cron.sh
+Wrapper that sources
+.I /etc/conf.d/partkeepr-ng
+and invokes the sync script with locking. Called from the cron line.
+.TP
+.I /usr/share/partkeepr-ng/api.env.example
+.IR backend/.env -format
+reference showing every supported env var with prose comments. NOT a
+drop-in for
+.I /etc/conf.d/partkeepr-ng
+(different syntax: dotenv vs shell-export).
+.TP
+.I /usr/share/partkeepr-ng/migrations/
+SQL migration files (0001 through 0006). Re-applied by
+.IR migrate-from-upstream.sh .
+.TP
+.I /usr/share/partkeepr-ng/frontend/
+Webix static assets.
+.TP
+.I /var/lib/partkeepr-ng/files/
+Default attachment storage. Owned
+.IR partkeepr:partkeepr ,
+mode 0750. Override with
+.I PARTKEEPR_STORAGE_DIR
+for large installs (e.g. ZFS dataset).
+.TP
+.I /var/log/partkeepr-ng/api.log
+Combined stdout/stderr from the daemon. OpenRC's initscript captures
+both streams; the daemon does not open the log itself.
+.SH FIRST-TIME SETUP
+.IP 1.
+Edit
+.I /etc/conf.d/partkeepr-ng
+to set
+.IR DATABASE_URL ,
+generate
+.IR PARTKEEPR_SESSION_SECRET ,
+and review the data-directory paths. See
+.BR partkeepr-ng.conf (5).
+.IP 2.
+Create the MariaDB database and user:
+.PP
+.RS
+.nf
+CREATE DATABASE partkeepr CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'partkeepr'@'localhost' IDENTIFIED BY '...';
+GRANT ALL ON partkeepr.* TO 'partkeepr'@'localhost';
+.fi
+.RE
+.IP 3.
+Migration from an existing PartKeepr 1.4.0 install: restore the legacy
+mysqldump into the new DB, then run
+.IR "/usr/libexec/partkeepr-ng/migrate-from-upstream.sh -u USER -d DATABASE" .
+Rsync the legacy
+.I data/files/
+tree into
+.IR $PARTKEEPR_STORAGE_DIR ,
+preserving subdirectory structure
+.RI ( PartAttachment/ ,
+.IR FootprintAttachment/ ,
+.IR images/iclogo/ ,
+etc.).
+.IP 4.
+.IR "rc-update add partkeepr-ng default" " and " "rc-service partkeepr-ng start" .
+.SH SEE ALSO
+.BR partkeepr-ng.conf (5),
+.BR mariadb (1),
+.BR clamd (8),
+.BR apache2 (8),
+.BR certbot (1),
+.BR cron (8)
+.SH AUTHOR
+Don Bishop <dbishop@spectraq.com>.
+.SH BUGS
+Report at
+.UR https://github.com/dbishop/partkeepr-ng/issues
+the project issue tracker.
+.UE

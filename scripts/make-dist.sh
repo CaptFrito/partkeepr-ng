@@ -39,10 +39,11 @@ cp scripts/migrate-from-upstream.sh \
 cp -r scripts/migrations    "${DIST_DIR}/scripts/"
 cp -r scripts/jlcparts-build "${DIST_DIR}/scripts/"
 
-# Docs the ebuild's dodoc references.
+# Docs the ebuild's dodoc / doman references.
 mkdir -p "${DIST_DIR}/docs"
 cp docs/migrating-from-partkeepr-1.4.0.md "${DIST_DIR}/docs/"
 cp docs/manual-smoke-tests.md             "${DIST_DIR}/docs/"
+cp -r docs/man                            "${DIST_DIR}/docs/"
 cp README.md LICENSE                      "${DIST_DIR}/"
 [[ -f CHANGELOG.md ]] && cp CHANGELOG.md  "${DIST_DIR}/" || true
 
