@@ -24,17 +24,24 @@
 # missing source dirs cleanly.
 #
 # Usage:
-#     scripts/import-legacy-files.sh
-#         (defaults to root@parts.spectraq.com:/var/www/com.spectraq.parts/data)
 #     scripts/import-legacy-files.sh /local/path/to/data
 #     scripts/import-legacy-files.sh user@host:/some/path/data
 #
 # After rsync the script invokes clamdscan with --fdpass on the
 # destination, so files are virus-scanned before they can be served.
+#
+# The expected source layout is a PartKeepr 1.4.0 data directory:
+#   <SRC>/files/PartAttachment/  <SRC>/files/FootprintAttachment/  ...
+#   <SRC>/images/iclogo/         <SRC>/images/footprint/           ...
 
 set -euo pipefail
 
-SRC="${1:-root@parts.spectraq.com:/var/www/com.spectraq.parts/data}"
+if [ $# -lt 1 ]; then
+    echo "usage: $0 <SOURCE>" >&2
+    echo "  SOURCE: rsync-style path; e.g. /path/to/data or user@host:/path/to/data" >&2
+    exit 2
+fi
+SRC="$1"
 DEST="${PARTKEEPR_STORAGE_DIR:-$HOME/.local/share/partkeepr-ng/files}"
 SRC_TRIMMED="${SRC%/}"
 

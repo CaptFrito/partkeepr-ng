@@ -18,9 +18,9 @@ mariadb -u partkeepr_dev -ppartkeepr_dev partkeepr_dev \
     < ../docs/live-schema/partkeepr-schema.sql
 ```
 
-Charset is `utf8`/`utf8_unicode_ci` to match the prod install at
-`parts.spectraq.com` exactly. A `utf8mb4` upgrade is a separate decision
-for later in the rewrite.
+Charset is `utf8`/`utf8_unicode_ci` to match the legacy PartKeepr 1.4.0
+install exactly. A `utf8mb4` upgrade is a separate decision for later
+in the rewrite.
 
 ## Run
 

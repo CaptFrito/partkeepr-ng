@@ -6,11 +6,11 @@ A from-scratch Rust + Webix rewrite of the abandoned upstream
 inventory in a small workshop. Same MariaDB schema, modern stack
 underneath, drop-in compatible with existing 1.4.0 installs.
 
-> **Status: alpha.** The author's workshop runs partkeepr-ng on the
-> LAN for parity testing; the legacy PartKeepr 1.4.0 stays at
-> `parts.spectraq.com` as the daily-driver until feature parity
-> closes. Treat this as "works on my workshop bench, no warranty,
-> no support guarantees." If you want a feature, fork.
+> **Status: alpha.** The author's workshop runs partkeepr-ng on the LAN
+> for parity testing alongside a legacy PartKeepr 1.4.0 install that
+> remains the daily-driver until feature parity closes. Treat this as
+> "works on my workshop bench, no warranty, no support guarantees." If
+> you want a feature, fork.
 
 ## What it does
 
