@@ -98,6 +98,23 @@ async fn main() -> anyhow::Result<()> {
     let jlcparts = handlers::jlcparts::JlcPartsConfig::from_env().await;
     let state = AppState { pool, store, signer, printing, mouser, digikey, trustedparts, jlcparts };
 
+    // One-line summary of optional-integration state. Operators that
+    // miss the per-handler INFO/WARN lines above can grep this banner
+    // for `=off` to find integrations they may want to enable in
+    // /etc/conf.d/partkeepr-ng (or backend/.env in dev).
+    let on_off = |b: bool| if b { "on" } else { "off" };
+    tracing::info!(
+        "feature status — clamd={} ptouch={} mouser_search={} mouser_orders={} \
+         digikey={} trustedparts={} jlcparts={}",
+        on_off(state.store.clamd.enabled()),
+        on_off(state.printing.ptouch_bin.is_some()),
+        on_off(state.mouser.search_key.is_some()),
+        on_off(state.mouser.order_key.is_some()),
+        on_off(state.digikey.available()),
+        on_off(state.trustedparts.available()),
+        on_off(state.jlcparts.available()),
+    );
+
     // Frontend is served as static assets out of this directory. Default
     // is "../frontend" relative to the backend cwd (matches the dev
     // checkout layout). Production sets PARTKEEPR_FRONTEND_DIR to the
