@@ -29,6 +29,7 @@ pub mod stock;
 pub mod storage;
 pub mod storage_locations;
 pub mod trustedparts;
+pub mod version;
 
 /// Hand-written endpoints. Merged into the main router alongside the
 /// codegen routes from `models::routes()`. Routes here take precedence by
@@ -39,6 +40,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))
         .route("/api/me", get(auth::me))
+        .route("/api/version", get(version::version))
         .route("/api/part_categories/tree", get(parts::category_tree))
         .route(
             "/api/part_categories",

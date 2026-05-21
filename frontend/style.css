@@ -28,6 +28,14 @@
     vertical-align: middle;
 }
 
+.pk-header .pk-app-version {
+    font-size: 11px;
+    color: #9ab0c2;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+}
+
 /* The teal "P" logo lifted from upstream PartKeepr (GPLv3, no
    trademark claim). Used in the banner and as the favicon. */
 .pk-header .pk-app-logo {

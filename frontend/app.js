@@ -127,6 +127,17 @@ function mountShell(user) {
     // Figure out which lookup sources are
     // available; reveal the "🔎 Add via Mouser" button on hit.
     refreshLookupCapabilities();
+    // Pull the backend version once + render it as a small chip next
+    // to the header title. Best-effort — failure leaves the title bare.
+    api.version().then((v) => {
+        const lbl = $$("pk-app-title-label");
+        if (!lbl || !v || !v.version) return;
+        lbl.define("label",
+            '<img src="assets/logo.svg" class="pk-app-logo" alt=""/>' +
+            '<span class="pk-app-title">PartKeepr-ng</span>' +
+            '<span class="pk-app-version">v' + escapeHtml(v.version) + '</span>');
+        lbl.refresh();
+    }).catch((e) => console.warn("version fetch failed:", e));
 
     // Lazy-load the other trees the first time the user switches to
     // them. Webix tabbar with multiview:true auto-fires onChange when
@@ -162,9 +173,10 @@ function buildHeader(user) {
         height: 40,
         cols: [
             { view: "label",
+              id: "pk-app-title-label",
               label: '<img src="assets/logo.svg" class="pk-app-logo" alt=""/>' +
                      '<span class="pk-app-title">PartKeepr-ng</span>',
-              width: 200 },
+              width: 240 },
             {},
             {
                 view: "search",

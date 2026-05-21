@@ -17,6 +17,11 @@ const api = {
         if (!r.ok) throw new Error(`/api/me failed: ${r.status}`);
         return r.json();
     },
+    async version() {
+        const r = await fetch("/api/version");
+        if (!r.ok) throw new Error(`/api/version failed: ${r.status}`);
+        return r.json();
+    },
     async login(username, password) {
         const r = await fetch("/api/login", {
             method: "POST",
