@@ -1,10 +1,16 @@
 # partkeepr-ng
 
-A from-scratch Rust + Webix rewrite of the abandoned upstream
-[PartKeepr](https://github.com/partkeepr/PartKeepr) (Symfony 2.7 / PHP 5.6
-/ Doctrine 2.5 / ExtJS 6 — all years EOL), for managing an electronic-parts
-inventory in a small workshop. Same MariaDB schema, modern stack
-underneath, drop-in compatible with existing 1.4.0 installs.
+**partkeepr-ng is an open-source electronics-parts inventory application
+aimed at electronics developers, prototypers, and small-to-medium
+workshops** — anyone running a few hundred to a few thousand parts
+across bins, reels, and projects.
+
+Under the hood it's a from-scratch Rust + Webix rewrite of the abandoned
+upstream [PartKeepr](https://github.com/partkeepr/PartKeepr) (Symfony
+2.7 / PHP 5.6 / Doctrine 2.5 / ExtJS 6 — all years EOL), drop-in
+compatible with the existing 1.4.0 MariaDB schema.
+
+![partkeepr-ng main view](docs/images/partkeepr-main.png)
 
 > **Status: alpha.** The author's workshop runs partkeepr-ng on the LAN
 > for parity testing alongside a legacy PartKeepr 1.4.0 install that
