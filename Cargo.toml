@@ -13,4 +13,4 @@ resolver = "2"
 # at build time on chrisbuck. Both files must be bumped together at
 # release time.
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"

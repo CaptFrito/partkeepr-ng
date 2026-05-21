@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "partkeepr-api"
-version = "0.1.10"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "axum",

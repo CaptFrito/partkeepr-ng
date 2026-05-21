@@ -849,8 +849,10 @@ async function openLookupSearchDialog(opts) {
 
     const winId = "pk-lookup-dialog";
 
-    // The header reflects whichever source is currently active.
-    const headFor = (s) => s === "digikey" ? "Add part via Digi-Key" : "Add part via Mouser";
+    // Header stays generic — the dialog supports any configured vendor
+    // (source picker is inside the dialog body when ≥2 are available;
+    // when only 1 is, the operator knows from the button they clicked).
+    const headFor = () => "Add part via Vendor Lookup";
 
     webix.ui({
         view: "window",
@@ -859,7 +861,7 @@ async function openLookupSearchDialog(opts) {
         position: "center",
         width: 980,
         height: 640,
-        head: headFor(activeSource),
+        head: headFor(),
         body: {
             rows: [
                 // Source picker — shown only when 2+ sources available.
@@ -880,8 +882,6 @@ async function openLookupSearchDialog(opts) {
                                     onChange: function (newSrc) {
                                         activeSource = newSrc;
                                         localStorage.setItem(sourcePersistKey, newSrc);
-                                        const win = $$(winId);
-                                        if (win) win.config.head = headFor(newSrc);
                                         // Clear results — they're stale.
                                         const grid = $$("pk-lookup-results");
                                         if (grid) grid.clearAll();
@@ -1154,9 +1154,12 @@ async function openOrderReceiveDialog(source) {
     //   fully_received:        true → row greyed, apply forced false
     let lineState = [];
 
+    // Header stays generic — the dialog supports any configured vendor
+    // (source picker in the body when ≥2 are available). The vendor's
+    // name reappears in the form's source dropdown.
     const headTpl = (sid) => sid
-        ? `Receive ${sourceLabel(source)} Sales Order #${sid}`
-        : `Receive ${sourceLabel(source)} Sales Order`;
+        ? `Receive Vendor Order — Sales Order #${sid}`
+        : `Receive Vendor Order`;
 
     webix.ui({
         view: "window",
